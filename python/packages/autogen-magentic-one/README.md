@@ -84,6 +84,7 @@ You can install the Magentic-One package and then run the example code to see ho
 4. Magentic-One code uses code execution, you need to have [Docker installed](https://docs.docker.com/engine/install/) to run any examples.
 5. Magentic-One uses playwright to interact with web pages. You need to install the playwright dependencies. Run the following command to install the playwright dependencies:
 
+
 ```bash
 playwright install --with-deps chromium
 ```
