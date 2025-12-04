@@ -16,6 +16,7 @@ _MODEL_POINTERS = {
     "gpt-4-32k": "gpt-4-32k-0613",
     "gpt-3.5-turbo": "gpt-3.5-turbo-0125",
     "gpt-3.5-turbo-16k": "gpt-3.5-turbo-16k-0613",
+    "gpt-oss-120b": "gpt-oss-120b" ##### PALAK's change
 }
 
 _MODEL_INFO: Dict[str, ModelInfo] = {
@@ -121,6 +122,12 @@ _MODEL_INFO: Dict[str, ModelInfo] = {
         "json_output": True,
         "family": ModelFamily.GPT_35,
     },
+    "gpt-oss-120b": {
+        "vision": False,
+        "function_calling": True,
+        "json_output": True,
+        "family": ModelFamily.UNKNOWN ###### PALAK's change
+    }
 }
 
 _MODEL_TOKEN_LIMITS: Dict[str, int] = {
@@ -141,6 +148,7 @@ _MODEL_TOKEN_LIMITS: Dict[str, int] = {
     "gpt-3.5-turbo-instruct": 4096,
     "gpt-3.5-turbo-0613": 4096,
     "gpt-3.5-turbo-16k-0613": 16385,
+    "gpt-oss-120b": 131072, ##### PALAK's change
 }
 
 

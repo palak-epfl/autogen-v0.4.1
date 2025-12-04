@@ -35,7 +35,7 @@ async def main(logs_dir: str, hil_mode: bool, save_screenshots: bool) -> None:
 
     # Create an appropriate client
     client = ChatCompletionClient.load_component(json.loads(os.environ["CHAT_COMPLETION_CLIENT_CONFIG"]))
-    assert client.model_info["family"] == "gpt-4o", "This example requires the gpt-4o model"
+    # assert client.model_info["family"] == "gpt-4o", "This example requires the gpt-4o model" ##### PALAK: temporary change
 
     async with DockerCommandLineCodeExecutor(work_dir=logs_dir) as code_executor:
         # Register agents.
@@ -49,9 +49,9 @@ async def main(logs_dir: str, hil_mode: bool, save_screenshots: bool) -> None:
         )
         executor = AgentProxy(AgentId("Executor", "default"), runtime)
 
-        # Register agents.
-        await MultimodalWebSurfer.register(runtime, "WebSurfer", MultimodalWebSurfer)
-        web_surfer = AgentProxy(AgentId("WebSurfer", "default"), runtime)
+        # # Register agents.
+        # await MultimodalWebSurfer.register(runtime, "WebSurfer", MultimodalWebSurfer)
+        # web_surfer = AgentProxy(AgentId("WebSurfer", "default"), runtime)
 
         await FileSurfer.register(runtime, "file_surfer", lambda: FileSurfer(model_client=client))
         file_surfer = AgentProxy(AgentId("file_surfer", "default"), runtime)
@@ -63,7 +63,8 @@ async def main(logs_dir: str, hil_mode: bool, save_screenshots: bool) -> None:
         )
         user_proxy = AgentProxy(AgentId("UserProxy", "default"), runtime)
 
-        agent_list = [web_surfer, coder, executor, file_surfer]
+        # agent_list = [web_surfer, coder, executor, file_surfer]
+        agent_list = [coder, executor, file_surfer]
         if hil_mode:
             agent_list.append(user_proxy)
 
@@ -82,16 +83,16 @@ async def main(logs_dir: str, hil_mode: bool, save_screenshots: bool) -> None:
 
         runtime.start()
 
-        actual_surfer = await runtime.try_get_underlying_agent_instance(web_surfer.id, type=MultimodalWebSurfer)
-        await actual_surfer.init(
-            model_client=client,
-            downloads_folder=logs_dir,
-            start_page="https://www.bing.com",
-            browser_channel="chromium",
-            headless=True,
-            debug_dir=logs_dir,
-            to_save_screenshots=save_screenshots,
-        )
+        # actual_surfer = await runtime.try_get_underlying_agent_instance(web_surfer.id, type=MultimodalWebSurfer)
+        # await actual_surfer.init(
+        #     model_client=client,
+        #     downloads_folder=logs_dir,
+        #     start_page="https://www.bing.com",
+        #     browser_channel="chromium",
+        #     headless=True,
+        #     debug_dir=logs_dir,
+        #     to_save_screenshots=save_screenshots,
+        # )
 
         await runtime.send_message(RequestReplyMessage(), user_proxy.id)
         await runtime.stop_when_idle()
