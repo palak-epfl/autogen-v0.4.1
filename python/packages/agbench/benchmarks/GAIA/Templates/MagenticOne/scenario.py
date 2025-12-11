@@ -13,6 +13,16 @@ from autogen_ext.agents.web_surfer import MultimodalWebSurfer
 from autogen_ext.agents.file_surfer import FileSurfer
 from autogen_agentchat.agents import CodeExecutorAgent
 from autogen_agentchat.messages import TextMessage
+from typing import Any
+
+#### PALAK
+import logging
+from autogen_agentchat import EVENT_LOGGER_NAME, TRACE_LOGGER_NAME
+# For structured message logging, such as low-level messages between agents.
+event_logger = logging.getLogger(EVENT_LOGGER_NAME)
+event_logger.addHandler(logging.StreamHandler())
+event_logger.setLevel(logging.DEBUG)
+
 
 # Suppress warnings about the requests.Session() not being closed
 warnings.filterwarnings(action="ignore", message="unclosed", category=ResourceWarning)
@@ -25,8 +35,9 @@ async def main() -> None:
 
     orchestrator_client = ChatCompletionClient.load_component(config["orchestrator_client"])
     coder_client = ChatCompletionClient.load_component(config["coder_client"])
-    web_surfer_client = ChatCompletionClient.load_component(config["web_surfer_client"])
+    # web_surfer_client = ChatCompletionClient.load_component(config["web_surfer_client"])
     file_surfer_client = ChatCompletionClient.load_component(config["file_surfer_client"])
+
     
     # Read the prompt
     prompt = ""
@@ -34,10 +45,23 @@ async def main() -> None:
         prompt = fh.read().strip()
     filename = "__FILE_NAME__".strip()
 
+    #### PALAK
+    task_id = "__TASK_ID__".strip()
+
+    print("PALAK: task_id: ", task_id)
+    import uuid
+    if task_id == "":
+        custom_request_id_suffix = f"{uuid.uuid4()}"
+    else:
+        custom_request_id_suffix = f"{task_id}"
+
+    print("PALAK: custom_request_id_suffix: ", custom_request_id_suffix)
+
     # Set up the team
     coder = MagenticOneCoderAgent(
         "Assistant",
         model_client = coder_client,
+        custom_request_id_suffix = custom_request_id_suffix
     )
 
     executor = CodeExecutorAgent("ComputerTerminal", code_executor=LocalCommandLineCodeExecutor())
@@ -45,20 +69,22 @@ async def main() -> None:
     file_surfer = FileSurfer(
         name="FileSurfer",
         model_client = file_surfer_client,
+        custom_request_id_suffix = custom_request_id_suffix
     )
                 
-    web_surfer = MultimodalWebSurfer(
-        name="WebSurfer",
-        model_client = web_surfer_client,
-        downloads_folder=os.getcwd(),
-        debug_dir="logs",
-        to_save_screenshots=True,
-    )
+    # web_surfer = MultimodalWebSurfer(
+    #     name="WebSurfer",
+    #     model_client = web_surfer_client,
+    #     downloads_folder=os.getcwd(),
+    #     debug_dir="logs",
+    #     to_save_screenshots=True,
+    # )
 
     team = MagenticOneGroupChat(
-        [coder, executor, file_surfer, web_surfer],
+        # [coder, executor, file_surfer, web_surfer],
+        [coder, executor, file_surfer],
         model_client=orchestrator_client,
-        max_turns=20,
+        max_turns=20, ### 20 initially
         final_answer_prompt= f""",
 We have completed the following task:
 
@@ -72,7 +98,8 @@ ADDITIONALLY, your FINAL ANSWER MUST adhere to any formatting instructions speci
 If you are asked for a number, express it numerically (i.e., with digits rather than words), don't use commas, and don't include units such as $ or percent signs unless specified otherwise.
 If you are asked for a string, don't use articles or abbreviations (e.g. for cities), unless specified otherwise. Don't output any final sentence punctuation such as '.', '!', or '?'.
 If you are asked for a comma separated list, apply the above rules depending on whether the elements are numbers or strings.
-""".strip()
+""".strip(),
+    custom_request_id_suffix = custom_request_id_suffix
     )
 
     # Prepare the prompt
@@ -81,9 +108,19 @@ If you are asked for a comma separated list, apply the above rules depending on 
         filename_prompt = f"The question is about a file, document or image, which can be accessed by the filename '{filename}' in the current working directory."
     task = f"{prompt}\n\n{filename_prompt}"
 
-    # Run the task
+    # # Run the task
+
+    # stream = team.run_stream(task=task.strip())
+    # await Console(stream, output_stats=True)
+    import time
+    start_time = time.perf_counter()
     stream = team.run_stream(task=task.strip())
     await Console(stream)
+    # await Console(stream, output_stats=True)
+    end_time = time.perf_counter()
+    elapsed = end_time - start_time
+
+    print(f"Task completed in {elapsed:.3f} seconds")
 
 if __name__ == "__main__":
     asyncio.run(main())

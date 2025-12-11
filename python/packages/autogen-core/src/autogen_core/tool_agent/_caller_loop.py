@@ -38,7 +38,7 @@ async def tool_agent_caller_loop(
     generated_messages: List[LLMMessage] = []
 
     # Get a response from the model.
-    response = await model_client.create(input_messages, tools=tool_schema, cancellation_token=cancellation_token)
+    response = await model_client.create(input_messages, tools=tool_schema, cancellation_token=cancellation_token, custom_request_id="palak_tool_agent_1")
     # Add the response to the generated messages.
     generated_messages.append(AssistantMessage(content=response.content, source=caller_source))
 
@@ -72,7 +72,7 @@ async def tool_agent_caller_loop(
         generated_messages.append(FunctionExecutionResultMessage(content=function_results))
         # Query the model again with the new response.
         response = await model_client.create(
-            input_messages + generated_messages, tools=tool_schema, cancellation_token=cancellation_token
+            input_messages + generated_messages, tools=tool_schema, cancellation_token=cancellation_token, custom_request_id="palak_tool_agent_2"
         )
         generated_messages.append(AssistantMessage(content=response.content, source=caller_source))
 

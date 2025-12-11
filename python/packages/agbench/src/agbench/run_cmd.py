@@ -55,6 +55,129 @@ class ScenarioInstance(TypedDict):
     substitutions: Dict[str, Dict[str, str]]
     values: Dict[str, Dict[str, str]]
 
+##### PALAK (poisson distribution)
+import os
+import sys
+import json
+import errno
+import random
+from threading import Thread
+
+subsample_rng = random.Random()
+
+def run_scenarios_poisson(
+    scenario: str,
+    n_repeats: int,
+    is_native: bool,
+    config_file: Union[None, str],
+    token_provider: Optional[Callable[[], str]],
+    docker_image: Optional[str] = None,
+    results_dir: str = "Results",
+    subsample: Union[None, int, float] = None,
+    env_file: Union[None, str] = None,
+    poisson_rate: Optional[float] = None,  # NEW: Poisson rate in events/sec
+) -> None:
+    """
+    Run a set of AG-bench scenarios a given number of times.
+    If poisson_rate is set, agentic processes are launched asynchronously
+    at intervals drawn from an exponential distribution.
+    """
+
+    files: List[str] = []
+
+    # Determine scenario files
+    if scenario == "-" or os.path.isfile(scenario):
+        files.append(scenario)
+    elif os.path.isdir(scenario):
+        for f in os.listdir(scenario):
+            scenario_file = os.path.join(scenario, f)
+            if not os.path.isfile(scenario_file):
+                continue
+            if not scenario_file.lower().endswith(".jsonl"):
+                continue
+            files.append(scenario_file)
+    else:
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), scenario)
+
+    # Thread list for asynchronous launches
+    threads: List[Thread] = []
+    cumulative_time = 0.0
+
+    # Process all scenario files
+    for scenario_file in files:
+        scenario_name: Optional[str] = None
+        scenario_dir: Optional[str] = None
+        file_handle = None
+
+        if scenario_file == "-":
+            scenario_name = "stdin"
+            scenario_dir = "."
+            file_handle = sys.stdin
+        else:
+            scenario_name_parts = os.path.basename(scenario_file).split(".")
+            scenario_name_parts.pop()
+            scenario_name = ".".join(scenario_name_parts)
+            scenario_dir = os.path.dirname(os.path.realpath(scenario_file))
+            file_handle = open(scenario_file, "rt")
+
+        # Read all lines, subsample if needed
+        lines = [line for line in file_handle]
+        if subsample is not None:
+            n = int(len(lines) * subsample + 0.5) if 0 <= subsample < 1 else int(subsample)
+            n = max(0, min(n, len(lines)))
+            lines = subsample_rng.sample(lines, n)
+
+        for line in lines:
+            instance = json.loads(line)
+
+            # Create results directories
+            mkdir_p(results_dir)
+            results_scenario = os.path.join(results_dir, scenario_name)
+            mkdir_p(results_scenario)
+            results_instance = os.path.join(results_scenario, instance["id"])
+            mkdir_p(results_instance)
+
+            for i in range(n_repeats):
+                results_repetition = os.path.join(results_instance, str(i))
+                if os.path.isdir(results_repetition):
+                    print(f"Found folder {results_repetition} ... Skipping.")
+                    continue
+                print(f"Scheduling scenario {results_repetition}")
+
+                # Expand scenario
+                expand_scenario(scenario_dir, instance, results_repetition, config_file)
+
+                # Prepare environment
+                env = get_scenario_env(token_provider=token_provider, env_file=env_file)
+
+                # Thread target function
+                def run_scenario_later(results_path, env_vars, delay):
+                    time.sleep(delay)
+                    if is_native:
+                        run_scenario_natively(results_path, env_vars)
+                    else:
+                        run_scenario_in_docker(results_path, env_vars, docker_image=docker_image)
+
+                # Poisson delay
+                delay = 0.0
+                if poisson_rate is not None and poisson_rate > 0:
+                    wait_time = random.expovariate(poisson_rate)
+                    cumulative_time += wait_time
+                    delay = cumulative_time
+
+                # Launch asynchronously
+                t = Thread(target=run_scenario_later, args=(results_repetition, env, delay))
+                t.start()
+                threads.append(t)
+
+        if scenario_file != "-":
+            file_handle.close()
+
+    # Wait for all launched threads to finish
+    for t in threads:
+        t.join()
+
+
 
 def run_scenarios(
     scenario: str,
@@ -755,7 +878,6 @@ def mkdir_p(path: str) -> None:
         if exc.errno != errno.EEXIST:
             raise
 
-
 def run_scenarios_subset(
     scenario_name: str,
     scenarios: List[Dict[str, Any]],
@@ -842,7 +964,6 @@ def run_parallel(args: argparse.Namespace) -> None:
 
         # Run scenarios in parallel
         pool.starmap(run_scenarios_subset, worker_args)
-
 
 def get_azure_token_provider() -> Optional[Callable[[], str]]:
     """
@@ -999,13 +1120,26 @@ def run_cli(args: Sequence[str]) -> None:
     if parsed_args.parallel > 1:
         run_parallel(parsed_args)
     else:
-        run_scenarios(
+        # run_scenarios(
+        #     scenario=parsed_args.scenario,
+        #     n_repeats=parsed_args.repeat,
+        #     is_native=True if parsed_args.native else False,
+        #     config_file=parsed_args.config,
+        #     token_provider=azure_token_provider,
+        #     docker_image=parsed_args.docker_image,
+        #     subsample=subsample,
+        #     env_file=parsed_args.env,
+        # )
+
+        run_scenarios_poisson(
             scenario=parsed_args.scenario,
-            n_repeats=parsed_args.repeat,
+            # n_repeats=parsed_args.repeat,
+            n_repeats=2,
             is_native=True if parsed_args.native else False,
             config_file=parsed_args.config,
             token_provider=azure_token_provider,
             docker_image=parsed_args.docker_image,
             subsample=subsample,
             env_file=parsed_args.env,
+            poisson_rate=40.0
         )

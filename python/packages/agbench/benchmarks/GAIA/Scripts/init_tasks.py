@@ -63,6 +63,7 @@ def create_jsonl(name, tasks, files_dir, template):
                 "substitutions": {
                     "scenario.py": {
                         "__FILE_NAME__": task["file_name"],
+                        "__TASK_ID__": task["task_id"], ##### PALAK
                     },
                     "expected_answer.txt": {"__EXPECTED_ANSWER__": task["Final answer"]},
                     "prompt.txt": {"__PROMPT__": task["Question"]},
@@ -88,7 +89,9 @@ def main():
     with open(os.path.join(gaia_validation_files, "metadata.jsonl")) as fh:
         for line in fh:
             data = json.loads(line)
-            gaia_validation_tasks[data["Level"] - 1].append(data)
+            # gaia_validation_tasks[data["Level"] - 1].append(data)
+            level = int(data["Level"]) - 1
+            gaia_validation_tasks[level].append(data)
 
     gaia_test_tasks = [[], [], []]
     with open(os.path.join(gaia_test_files, "metadata.jsonl")) as fh:
@@ -99,7 +102,9 @@ def main():
             if data["task_id"] == "0-0-0-0-0":
                 continue
 
-            gaia_test_tasks[data["Level"] - 1].append(data)
+            # gaia_test_tasks[data["Level"] - 1].append(data)
+            level = int(data["Level"]) - 1
+            gaia_test_tasks[level].append(data)
 
     # list all directories in the Templates directory
     # and populate a dictionary with the name and path

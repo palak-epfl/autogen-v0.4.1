@@ -116,7 +116,7 @@ async def transcribe_video_screenshot(video_path: str, timestamp: float, model_c
         )
     ]
 
-    result = await model_client.create(messages=messages)
+    result = await model_client.create(messages=messages, custom_request_id="palak_video_screenshot")
     return str(result.content)
 
 

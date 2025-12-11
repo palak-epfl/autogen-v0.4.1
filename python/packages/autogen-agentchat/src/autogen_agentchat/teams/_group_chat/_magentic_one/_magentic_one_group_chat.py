@@ -1,6 +1,8 @@
 import asyncio
 import logging
 from typing import Callable, List
+from typing import Any
+
 
 from autogen_core import AgentRuntime, Component, ComponentModel
 from autogen_core.models import ChatCompletionClient
@@ -120,6 +122,7 @@ class MagenticOneGroupChat(BaseGroupChat, Component[MagenticOneGroupChatConfig])
         final_answer_prompt: str = ORCHESTRATOR_FINAL_ANSWER_PROMPT,
         custom_message_types: List[type[BaseAgentEvent | BaseChatMessage]] | None = None,
         emit_team_events: bool = False,
+        **kwargs: Any
     ):
         for participant in participants:
             if not isinstance(participant, ChatAgent):
@@ -143,6 +146,8 @@ class MagenticOneGroupChat(BaseGroupChat, Component[MagenticOneGroupChatConfig])
         self._model_client = model_client
         self._max_stalls = max_stalls
         self._final_answer_prompt = final_answer_prompt
+        self._custom_request_id_suffix = kwargs.get("custom_request_id_suffix", 1234567) #### PALAK
+
 
     def _create_group_chat_manager_factory(
         self,
@@ -172,6 +177,7 @@ class MagenticOneGroupChat(BaseGroupChat, Component[MagenticOneGroupChatConfig])
             output_message_queue,
             termination_condition,
             self._emit_team_events,
+            custom_request_id_suffix = self._custom_request_id_suffix #### PALAK
         )
 
     def _to_config(self) -> MagenticOneGroupChatConfig:

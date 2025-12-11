@@ -2,6 +2,8 @@ import json
 import os
 import traceback
 from typing import List, Sequence, Tuple
+from typing import Any
+
 
 from autogen_agentchat.agents import BaseChatAgent
 from autogen_agentchat.base import Response
@@ -77,11 +79,14 @@ class FileSurfer(BaseChatAgent, Component[FileSurferConfig]):
         model_client: ChatCompletionClient,
         description: str = DEFAULT_DESCRIPTION,
         base_path: str = os.getcwd(),
+        **kwargs: Any #### PALAK
     ) -> None:
         super().__init__(name, description)
         self._model_client = model_client
         self._chat_history: List[LLMMessage] = []
         self._browser = MarkdownFileBrowser(viewport_size=1024 * 5, base_path=base_path)
+        #### PALAK
+        self._custom_request_id_suffix = kwargs.get("custom_request_id_suffix", 1234567)
 
     @property
     def produced_message_types(self) -> Sequence[type[BaseChatMessage]]:
@@ -147,6 +152,7 @@ class FileSurfer(BaseChatAgent, Component[FileSurferConfig]):
                 TOOL_FIND_ON_PAGE_CTRL_F,
             ],
             cancellation_token=cancellation_token,
+            custom_request_id=f"palak_file_surfer_agent_{self._custom_request_id_suffix}"
         )
 
         response = create_result.content

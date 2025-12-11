@@ -961,6 +961,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
             cancellation_token=cancellation_token,
             output_content_type=output_content_type,
             message_id=message_id,
+            custom_request_id=self._metadata.get('agent_type', 'unknown') #### PALAK's change
         ):
             if isinstance(inference_output, CreateResult):
                 model_result = inference_output
@@ -1065,6 +1066,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         cancellation_token: CancellationToken,
         output_content_type: type[BaseModel] | None,
         message_id: str,
+        custom_request_id: str | None = None
     ) -> AsyncGenerator[Union[CreateResult, ModelClientStreamingChunkEvent], None]:
         """Call the language model with given context and configuration.
 
@@ -1082,6 +1084,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         Returns:
             Generator yielding model results or streaming chunks
         """
+        print("PALAK: inside assistant_agent _call_llm function...")
         all_messages = await model_context.get_messages()
         llm_messages = cls._get_compatible_context(model_client=model_client, messages=system_messages + all_messages)
 
@@ -1089,7 +1092,8 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
 
         if model_client_stream:
             model_result: Optional[CreateResult] = None
-
+            print("PALAK: ARE WE EVER HERE? ")
+            input("PRESS ENTER TO CONTINUE...")
             async for chunk in model_client.create_stream(
                 llm_messages,
                 tools=tools,
@@ -1106,11 +1110,25 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
                 raise RuntimeError("No final model result in streaming mode.")
             yield model_result
         else:
+            # model_result = await model_client.create(
+            #     llm_messages,
+            #     tools=tools,
+            #     cancellation_token=cancellation_token,
+            #     json_output=output_content_type,
+            # )
+            #### PALAK's change
+            if custom_request_id:
+                print(f"PALAK: Assistant agent: Request ID: {custom_request_id}")
+            else:
+                print("PALAK: Assistant agent: No request ID provided")
+                custom_request_id = "unknown"
+
             model_result = await model_client.create(
                 llm_messages,
                 tools=tools,
                 cancellation_token=cancellation_token,
                 json_output=output_content_type,
+                custom_request_id = custom_request_id
             )
             yield model_result
 
@@ -1271,6 +1289,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
                 cancellation_token=cancellation_token,
                 output_content_type=output_content_type,
                 message_id=message_id,  # Use same message ID for consistency
+                custom_request_id=self._metadata.get('agent_type', 'unknown') #### PALAK's change
             ):
                 if isinstance(llm_output, CreateResult):
                     next_model_result = llm_output
@@ -1452,6 +1471,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
                 json_output=output_content_type,
                 cancellation_token=cancellation_token,
                 tool_choice="none",  # Do not use tools in reflection flow.
+                custom_request_id="palak_assistant_agent_reflect_on_tool_use"
             )
 
         if not reflection_result or not isinstance(reflection_result.content, str):

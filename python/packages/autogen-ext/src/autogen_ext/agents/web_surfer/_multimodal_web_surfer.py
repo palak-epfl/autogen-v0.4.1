@@ -606,9 +606,13 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
         # ===================================================
         # """)
 
+
+        print("PALAK: websurfer: ")
+        print("PALAK: history: ", history)
+        print("PALAK: tools: ", tools)
         # Make the request
         response = await self._model_client.create(
-            history, tools=tools, extra_create_args={"tool_choice": "auto"}, cancellation_token=cancellation_token
+            history, tools=tools, extra_create_args={"tool_choice": "auto"}, cancellation_token=cancellation_token, custom_request_id="palak_web_surfer_generate_agent"
         )  # , "parallel_tool_calls": False})
 
         self.model_usage.append(response.usage)
@@ -946,7 +950,7 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
             )
 
         # Generate the response
-        response = await self._model_client.create(messages, cancellation_token=cancellation_token)
+        response = await self._model_client.create(messages, cancellation_token=cancellation_token, custom_request_id="palak_web_surfer_summarize_agent")
         self.model_usage.append(response.usage)
         scaled_screenshot.close()
         assert isinstance(response.content, str)

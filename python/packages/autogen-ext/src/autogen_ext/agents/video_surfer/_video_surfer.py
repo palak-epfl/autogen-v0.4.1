@@ -156,6 +156,7 @@ class VideoSurfer(AssistantAgent):
             ],
             description=description or self.DEFAULT_DESCRIPTION,
             system_message=system_message or self.DEFAULT_SYSTEM_MESSAGE,
+            metadata={"agent_type":"palak_video_surfer_agent"}
         )
 
     async def vs_transribe_video_screenshot(self, video_path: str, timestamp: float) -> str:

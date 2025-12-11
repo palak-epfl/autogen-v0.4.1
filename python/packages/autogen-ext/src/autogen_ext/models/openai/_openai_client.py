@@ -669,6 +669,7 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         json_output: Optional[bool | type[BaseModel]] = None,
         extra_create_args: Mapping[str, Any] = {},
         cancellation_token: Optional[CancellationToken] = None,
+        custom_request_id: str = None,
     ) -> CreateResult:
         create_params = self._process_create_args(
             messages,
@@ -679,6 +680,7 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         )
         future: Union[Task[ParsedChatCompletion[BaseModel]], Task[ChatCompletion]]
         if create_params.response_format is not None:
+            print("PALAK: and here???????????????")
             # Use beta client if response_format is not None
             future = asyncio.ensure_future(
                 self._client.beta.chat.completions.parse(
@@ -686,16 +688,36 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
                     tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
                     response_format=create_params.response_format,
                     **create_params.create_args,
+                    extra_headers={
+                        "x-request-id": f"{custom_request_id}",
+                    },
                 )
             )
         else:
+            # # Use the regular client
+            # future = asyncio.ensure_future(
+            #     self._client.chat.completions.create(
+            #         messages=create_params.messages,
+            #         stream=False,
+            #         tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
+            #         **create_params.create_args,
+            #     )
+            # )
+
+            #### PALAK's change
             # Use the regular client
+            print("PALAK: are we ever here!!!!!")
+            # import uuid
+            # custom_request_id = f"{custom_request_id}_{uuid.uuid4()}"
             future = asyncio.ensure_future(
                 self._client.chat.completions.create(
                     messages=create_params.messages,
                     stream=False,
                     tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
                     **create_params.create_args,
+                    extra_headers={
+                        "x-request-id": f"{custom_request_id}",
+                    },
                 )
             )
 
@@ -704,6 +726,9 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         result: Union[ParsedChatCompletion[BaseModel], ChatCompletion] = await future
         if create_params.response_format is not None:
             result = cast(ParsedChatCompletion[Any], result)
+
+        # print("PALAK: THIS IS INTERESTING !!!!!!!!! result: ", result)
+        # input("press enter to continue...")
 
         # Handle the case where OpenAI API might return None for token counts
         # even when result.usage is not None
@@ -847,6 +872,7 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             - `presence_penalty` (float): A value between -2.0 and 2.0 that penalizes new tokens based on whether they appear in the text so far, encouraging the model to talk about new topics.
         """
 
+        print("PALAK: inside create_stream: so we do reach here!!!!!!")
         create_params = self._process_create_args(
             messages,
             tools,

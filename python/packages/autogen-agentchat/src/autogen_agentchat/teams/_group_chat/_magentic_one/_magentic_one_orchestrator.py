@@ -74,6 +74,7 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         output_message_queue: asyncio.Queue[BaseAgentEvent | BaseChatMessage | GroupChatTermination],
         termination_condition: TerminationCondition | None,
         emit_team_events: bool,
+        **kwargs: Any
     ):
         super().__init__(
             name,
@@ -97,6 +98,8 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         self._plan = ""
         self._n_rounds = 0
         self._n_stalls = 0
+        self._custom_request_id_suffix = kwargs.get("custom_request_id_suffix", 1234567) #### PALAK
+
 
         # Produce a team description. Each agent sould appear on a single line.
         self._team_description = ""
@@ -165,8 +168,10 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         planning_conversation.append(
             UserMessage(content=self._get_task_ledger_facts_prompt(self._task), source=self._name)
         )
+
+        print("PALAK: palak_orchestrator_gather_facts")
         response = await self._model_client.create(
-            self._get_compatible_context(planning_conversation), cancellation_token=ctx.cancellation_token
+            self._get_compatible_context(planning_conversation), cancellation_token=ctx.cancellation_token, custom_request_id=f"palak_orchestrator_gather_facts_{self._custom_request_id_suffix}"
         )
 
         assert isinstance(response.content, str)
@@ -178,8 +183,10 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         planning_conversation.append(
             UserMessage(content=self._get_task_ledger_plan_prompt(self._team_description), source=self._name)
         )
+
+        print("PALAK: palak_orchestrator_create_plan")
         response = await self._model_client.create(
-            self._get_compatible_context(planning_conversation), cancellation_token=ctx.cancellation_token
+            self._get_compatible_context(planning_conversation), cancellation_token=ctx.cancellation_token, custom_request_id=f"palak_orchestrator_create_plan_{self._custom_request_id_suffix}"
         )
 
         assert isinstance(response.content, str)
@@ -317,16 +324,19 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         key_error: bool = False
         for _ in range(self._max_json_retries):
             if self._model_client.model_info.get("structured_output", False):
+                print("PALAK: palak_orchestrator_progress_ledger_so")
                 response = await self._model_client.create(
-                    self._get_compatible_context(context), json_output=LedgerEntry
+                    self._get_compatible_context(context), json_output=LedgerEntry, custom_request_id=f"palak_orchestrator_progress_ledger_so_{self._custom_request_id_suffix}"
                 )
             elif self._model_client.model_info.get("json_output", False):
+                print("PALAK: palak_orchestrator_progress_ledger_jo")
                 response = await self._model_client.create(
-                    self._get_compatible_context(context), cancellation_token=cancellation_token, json_output=True
+                    self._get_compatible_context(context), cancellation_token=cancellation_token, json_output=True, custom_request_id=f"palak_orchestrator_progress_ledger_jo_{self._custom_request_id_suffix}"
                 )
             else:
+                print("PALAK: palak_orchestrator_progress_ledger")
                 response = await self._model_client.create(
-                    self._get_compatible_context(context), cancellation_token=cancellation_token
+                    self._get_compatible_context(context), cancellation_token=cancellation_token, custom_request_id=f"palak_orchestrator_progress_ledger_{self._custom_request_id_suffix}"
                 )
             ledger_str = response.content
             try:
@@ -456,8 +466,9 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         update_facts_prompt = self._get_task_ledger_facts_update_prompt(self._task, self._facts)
         context.append(UserMessage(content=update_facts_prompt, source=self._name))
 
+        print("PALAK: palak_orchestrator_update_facts")
         response = await self._model_client.create(
-            self._get_compatible_context(context), cancellation_token=cancellation_token
+            self._get_compatible_context(context), cancellation_token=cancellation_token, custom_request_id=f"palak_orchestrator_update_facts_{self._custom_request_id_suffix}"
         )
 
         assert isinstance(response.content, str)
@@ -468,8 +479,9 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         update_plan_prompt = self._get_task_ledger_plan_update_prompt(self._team_description)
         context.append(UserMessage(content=update_plan_prompt, source=self._name))
 
+        print("PALAK: palak_orchestrator_update_plan")
         response = await self._model_client.create(
-            self._get_compatible_context(context), cancellation_token=cancellation_token
+            self._get_compatible_context(context), cancellation_token=cancellation_token, custom_request_id=f"palak_orchestrator_update_plan_{self._custom_request_id_suffix}"
         )
 
         assert isinstance(response.content, str)
@@ -483,8 +495,9 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         final_answer_prompt = self._get_final_answer_prompt(self._task)
         context.append(UserMessage(content=final_answer_prompt, source=self._name))
 
+        print("PALAK: palak_orchestrator_prepare_final_ans")
         response = await self._model_client.create(
-            self._get_compatible_context(context), cancellation_token=cancellation_token
+            self._get_compatible_context(context), cancellation_token=cancellation_token, custom_request_id=f"palak_orchestrator_prepare_final_ans_{self._custom_request_id_suffix}"
         )
         assert isinstance(response.content, str)
         message = TextMessage(content=response.content, source=self._name)

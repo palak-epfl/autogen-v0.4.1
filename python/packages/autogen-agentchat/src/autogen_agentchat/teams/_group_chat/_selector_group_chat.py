@@ -266,7 +266,7 @@ class SelectorGroupChatManager(BaseGroupChatManager):
                 assert isinstance(chunk, CreateResult)
                 response = chunk
             else:
-                response = await self._model_client.create(messages=select_speaker_messages)
+                response = await self._model_client.create(messages=select_speaker_messages, custom_request_id="palak_selector_group_manager")
             assert isinstance(response.content, str)
             select_speaker_messages.append(AssistantMessage(content=response.content, source="selector"))
             # NOTE: we use all participant names to check for mentions, even if the previous speaker is not allowed.

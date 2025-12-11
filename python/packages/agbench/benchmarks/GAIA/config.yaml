@@ -4,13 +4,13 @@
 # every expanded Task, just prior to running the scenario. This provides a
 # good place to store model or other configurations important for the scenario.
 
-###############################
-# Open AI model configuration #
-###############################
-model_config: &client
-  provider: autogen_ext.models.openai.OpenAIChatCompletionClient
-  config:
-    model: gpt-4o
+# ###############################
+# # Open AI model configuration #
+# ###############################
+# model_config: &client
+#   provider: autogen_ext.models.openai.OpenAIChatCompletionClient
+#   config:
+#     model: gpt-4o
 
 
 ##############################
@@ -29,10 +29,45 @@ model_config: &client
 #        family: r1
 #
 
+# #############################
+# # vllm model configuration #
+# #############################
+# model_config: &client
+#    provider: autogen_ext.models.openai.OpenAIChatCompletionClient
+#    config:
+#     #  model: openai/gpt-oss-120b
+#      model: openai/gpt-oss-120b
+#      base_url: http://localhost:8000/v1/
+#      api_key: vllm
+#      model_info:
+#        function_calling: true
+#        json_output: true
+#        vision: false
+#        family: oss
+#        structured_output: true
+
+#############################
+# vllm model configuration #
+#############################
+model_config: &client
+   provider: autogen_ext.models.openai.OpenAIChatCompletionClient
+   config:
+     model: meta-llama/Llama-4-Scout-17B-16E-Instruct
+    #  base_url: http://localhost:8000/v1/
+     base_url: http://localhost:8000/v1/
+     api_key: vllm
+     model_info:
+       function_calling: true
+      #  json_output: true
+       json_output: false
+       vision: true
+       family: llama-4-scout
+       structured_output: true
+
 #######################
 # Used by MagenticOne #
 #######################
 orchestrator_client: *client
 coder_client: *client
 web_surfer_client: *client
-file_surfer_client: *client  
+file_surfer_client: *client

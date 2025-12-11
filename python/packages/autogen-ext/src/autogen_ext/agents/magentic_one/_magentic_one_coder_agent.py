@@ -38,4 +38,5 @@ class MagenticOneCoderAgent(AssistantAgent):
             model_client,
             description=MAGENTIC_ONE_CODER_DESCRIPTION,
             system_message=MAGENTIC_ONE_CODER_SYSTEM_MESSAGE,
+            metadata={"agent_type":f"palak_coder_agent_{kwargs.get('custom_request_id_suffix', 1234567)}"}
         )

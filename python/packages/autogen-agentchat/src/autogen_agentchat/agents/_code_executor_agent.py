@@ -645,7 +645,7 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
                 )
             ]
 
-            response = await model_client.create(messages=chat_context, json_output=RetryDecision)
+            response = await model_client.create(messages=chat_context, json_output=RetryDecision, custom_request_id="palak_code_executor_agent_retry")
 
             assert isinstance(
                 response.content, str
@@ -818,7 +818,7 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
                 raise RuntimeError("No final model result in streaming mode.")
             yield model_result
         else:
-            model_result = await model_client.create(llm_messages, tools=[], cancellation_token=cancellation_token)
+            model_result = await model_client.create(llm_messages, tools=[], cancellation_token=cancellation_token, custom_request_id="palak_code_executor_agent")
             yield model_result
 
     @staticmethod
@@ -863,7 +863,7 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
                 else:
                     raise RuntimeError(f"Invalid chunk type: {type(chunk)}")
         else:
-            reflection_result = await model_client.create(llm_messages)
+            reflection_result = await model_client.create(llm_messages, custom_request_id="palak_reflect_code_executor_agent")
 
         if not reflection_result or not isinstance(reflection_result.content, str):
             raise RuntimeError("Reflect on tool use produced no valid text response.")
