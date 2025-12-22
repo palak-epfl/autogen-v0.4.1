@@ -519,6 +519,9 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
         Process the incoming messages with the assistant agent and yield events/responses as they happen.
         """
 
+        # print("PALAK: inside code_executor_agent's on_messages_stream method...")
+        # print("PALAK: model_client: ", self._model_client)
+
         # Gather all relevant state here
         agent_name = self.name
         model_context = self._model_context
@@ -531,6 +534,7 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
         if model_client is None:  # default behaviour for backward compatibility
             # execute generated code if present
             code_blocks: List[CodeBlock] = await self.extract_code_blocks_from_messages(messages)
+            # print("PALAK: (default) code_blocks: ", code_blocks)
             if not code_blocks:
                 yield Response(
                     chat_message=TextMessage(
@@ -540,9 +544,11 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
                 )
                 return
             execution_result = await self.execute_code_block(code_blocks, cancellation_token)
+            # print("PALAK: execution_result: ", execution_result)
             yield Response(chat_message=TextMessage(content=execution_result.output, source=self.name))
             return
 
+        # print("PALAK: code_executor_agent has a model client (THIS NEVER HAPPENS)")
         inner_messages: List[BaseAgentEvent | BaseChatMessage] = []
 
         for nth_try in range(max_retries_on_error + 1):  # Do one default generation, execution and inference loop
@@ -562,6 +568,7 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
                 agent_name=agent_name,
                 cancellation_token=cancellation_token,
             ):
+                # print("PALAK: here is inference output: ", inference_output)
                 if isinstance(inference_output, CreateResult):
                     model_result = inference_output
                 else:
@@ -800,9 +807,11 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
         """
         Perform a model inference and yield either streaming chunk events or the final CreateResult.
         """
+        # print("PALAK: _code_executor_agent calling llm")
         all_messages = await model_context.get_messages()
         llm_messages = cls._get_compatible_context(model_client=model_client, messages=system_messages + all_messages)
 
+        # print("PALAK: _code_executor_agent message to llm: ", llm_messages)
         if model_client_stream:
             model_result: Optional[CreateResult] = None
             async for chunk in model_client.create_stream(
@@ -816,9 +825,11 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
                     raise RuntimeError(f"Invalid chunk type: {type(chunk)}")
             if model_result is None:
                 raise RuntimeError("No final model result in streaming mode.")
+            # print("PALAK: code_executor_agent's model result: ", model_result)
             yield model_result
         else:
             model_result = await model_client.create(llm_messages, tools=[], cancellation_token=cancellation_token, custom_request_id="palak_code_executor_agent")
+            # print("PALAK: code_executor_agent's model result: ", model_result)
             yield model_result
 
     @staticmethod
@@ -829,7 +840,9 @@ class CodeExecutorAgent(BaseChatAgent, Component[CodeExecutorAgentConfig]):
         """
         Add incoming messages to the model context.
         """
+        # # print("PALAK: computer terminal: add incoming messages to model_context: ")
         for msg in messages:
+            # print("PALAK: computer terminal: msg: ", msg)
             if isinstance(msg, HandoffMessage):
                 for llm_msg in msg.context:
                     await model_context.add_message(llm_msg)

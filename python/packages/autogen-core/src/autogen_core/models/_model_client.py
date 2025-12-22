@@ -51,6 +51,7 @@ class ModelFamily:
     MINISTRAL = "ministral"
     PIXTRAL = "pixtral"
     UNKNOWN = "unknown"
+    GPT_OSS = "gpt-oss-120b"
 
     ANY: TypeAlias = Literal[
         # openai_models
@@ -92,6 +93,7 @@ class ModelFamily:
         "pixtral",
         # unknown
         "unknown",
+        "gpt-oss-120b"
     ]
 
     def __new__(cls, *args: Any, **kwargs: Any) -> ModelFamily:

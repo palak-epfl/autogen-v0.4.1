@@ -223,6 +223,7 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
         to_resize_viewport: bool = True,
         playwright: Playwright | None = None,
         context: BrowserContext | None = None,
+        **kwargs: Any #### PALAK
     ):
         """
         Initialize the MultimodalWebSurfer.
@@ -257,6 +258,8 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
         self._prior_metadata_hash: str | None = None
         self.logger = logging.getLogger(EVENT_LOGGER_NAME + f".{self.name}.MultimodalWebSurfer")
         self._chat_history: List[LLMMessage] = []
+        #### PALAK
+        self._custom_request_id_suffix = kwargs.get("custom_request_id_suffix", 1234567)
 
         # Define the download handler
         def _download_handler(download: Download) -> None:
@@ -437,6 +440,10 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
         self.inner_messages: List[BaseAgentEvent | BaseChatMessage] = []
         self.model_usage: List[RequestUsage] = []
         try:
+            # print("PALAK: inside _multimodal_web_surfer on_messages_stream method")
+            # print("PALAK: self.model_usage: ", self.model_usage)
+            # print("PALAK: self.inner_messages: ", self.inner_messages)
+            # print("PALAK: ################")
             content = await self._generate_reply(cancellation_token=cancellation_token)
             self._chat_history.append(AssistantMessage(content=content_to_str(content), source=self.name))
             final_usage = RequestUsage(
@@ -484,6 +491,9 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
             ModelFamily.O3,
             ModelFamily.GPT_4,
             ModelFamily.GPT_35,
+            ModelFamily.LLAMA_4_SCOUT, ##### MY CHANGE
+            # ModelFamily.GPT_OSS ##### MY CHANGE
+
         ]:
             history = []
 
@@ -594,6 +604,9 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
             # Create the message
             prompt_message = UserMessage(content=re.sub(r"(\n\s*){3,}", "\n\n", text_prompt), source=self.name)
 
+            # print("PALAK: prompt_message for model without vision: ", prompt_message)
+            # print("\n\n\n\n\n\n")
+
         history.append(prompt_message)
         history.append(user_request)
 
@@ -607,12 +620,12 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
         # """)
 
 
-        print("PALAK: websurfer: ")
-        print("PALAK: history: ", history)
-        print("PALAK: tools: ", tools)
+        # print("PALAK: websurfer: ")
+        # print("PALAK: history: ", history)
+        # print("PALAK: tools: ", tools)
         # Make the request
         response = await self._model_client.create(
-            history, tools=tools, extra_create_args={"tool_choice": "auto"}, cancellation_token=cancellation_token, custom_request_id="palak_web_surfer_generate_agent"
+            history, tools=tools, extra_create_args={"tool_choice": "auto"}, cancellation_token=cancellation_token, custom_request_id=f"palak_web_surfer_generate_agent_{self._custom_request_id_suffix}"
         )  # , "parallel_tool_calls": False})
 
         self.model_usage.append(response.usage)
@@ -816,10 +829,20 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
             f"{action_description}\n\n" + state_description + page_metadata + "\nHere is a screenshot of the page."
         )
 
-        return [
+
+        # print("PALAK: inside _multimodal_web_surfer")
+        # print("PALAK: message content: ", message_content)
+        # print("\n\n\n\n")
+        temp_messages = [
             re.sub(r"(\n\s*){3,}", "\n\n", message_content),  # Removing blank lines
             AGImage.from_pil(PIL.Image.open(io.BytesIO(new_screenshot))),
         ]
+        # print("PALAK: temp_messages: ", temp_messages)
+        # print("\n\n\n\n")
+
+        # testing = [temp_messages[0]] ######## PALAK: testing!
+        return temp_messages
+        # return testing
 
     async def _get_state_description(self) -> str:
         assert self._playwright_controller is not None
@@ -950,7 +973,7 @@ class MultimodalWebSurfer(BaseChatAgent, Component[MultimodalWebSurferConfig]):
             )
 
         # Generate the response
-        response = await self._model_client.create(messages, cancellation_token=cancellation_token, custom_request_id="palak_web_surfer_summarize_agent")
+        response = await self._model_client.create(messages, cancellation_token=cancellation_token, custom_request_id=f"palak_web_surfer_summarize_agent_{self._custom_request_id_suffix}")
         self.model_usage.append(response.usage)
         scaled_screenshot.close()
         assert isinstance(response.content, str)

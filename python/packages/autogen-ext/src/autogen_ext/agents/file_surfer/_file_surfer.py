@@ -154,17 +154,20 @@ class FileSurfer(BaseChatAgent, Component[FileSurferConfig]):
             cancellation_token=cancellation_token,
             custom_request_id=f"palak_file_surfer_agent_{self._custom_request_id_suffix}"
         )
-
+        # print("PALAK: file surfer input message: ", self._get_compatible_context(history + [context_message, task_message]))
+        # print("PALAK: file surfer response: ", create_result)
         response = create_result.content
 
         if isinstance(response, str):
             # Answer directly.
+            # print("PALAK: is file surfer answering directly with response: ", response)
             return False, response
 
         elif isinstance(response, list) and all(isinstance(item, FunctionCall) for item in response):
             function_calls = response
             for function_call in function_calls:
                 tool_name = function_call.name
+                # print("PALAK: file surfer toolname: ", tool_name)
 
                 try:
                     arguments = json.loads(function_call.arguments)
@@ -186,9 +189,12 @@ class FileSurfer(BaseChatAgent, Component[FileSurferConfig]):
                     self._browser.find_next()
             header, content = self._get_browser_state()
             final_response = header.strip() + "\n=======================\n" + content
+
+            # print("PALAK: file surfer's final response: ", final_response)
             return False, final_response
 
         final_response = "TERMINATE"
+        # print("PALAK: file surfer's final response: ", final_response)
         return False, final_response
 
     def _get_compatible_context(self, messages: List[LLMMessage]) -> List[LLMMessage]:

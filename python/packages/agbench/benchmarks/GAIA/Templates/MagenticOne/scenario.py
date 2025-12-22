@@ -15,27 +15,15 @@ from autogen_agentchat.agents import CodeExecutorAgent
 from autogen_agentchat.messages import TextMessage
 from typing import Any
 
-#### PALAK
-import logging
-from autogen_agentchat import EVENT_LOGGER_NAME, TRACE_LOGGER_NAME
-# For structured message logging, such as low-level messages between agents.
-event_logger = logging.getLogger(EVENT_LOGGER_NAME)
-event_logger.addHandler(logging.StreamHandler())
-event_logger.setLevel(logging.DEBUG)
-
-
-# Suppress warnings about the requests.Session() not being closed
-warnings.filterwarnings(action="ignore", message="unclosed", category=ResourceWarning)
-
 async def main() -> None:
-
+    print("PALAK: inside scenario's main method")
     # Load model configuration and create the model client.
     with open("config.yaml", "r") as f:
         config = yaml.safe_load(f)
 
     orchestrator_client = ChatCompletionClient.load_component(config["orchestrator_client"])
     coder_client = ChatCompletionClient.load_component(config["coder_client"])
-    # web_surfer_client = ChatCompletionClient.load_component(config["web_surfer_client"])
+    web_surfer_client = ChatCompletionClient.load_component(config["web_surfer_client"])
     file_surfer_client = ChatCompletionClient.load_component(config["file_surfer_client"])
 
     
@@ -47,13 +35,14 @@ async def main() -> None:
 
     #### PALAK
     task_id = "__TASK_ID__".strip()
+    MASK_64_BITS = (1 << 64) - 1
 
     print("PALAK: task_id: ", task_id)
     import uuid
     if task_id == "":
-        custom_request_id_suffix = f"{uuid.uuid4()}"
+        custom_request_id_suffix = f"no_task_id_{uuid.uuid4()}"
     else:
-        custom_request_id_suffix = f"{task_id}"
+        custom_request_id_suffix = f"{task_id}:{uuid.uuid4().int & MASK_64_BITS:016x}" ###### from vllm.utils random_uuid()
 
     print("PALAK: custom_request_id_suffix: ", custom_request_id_suffix)
 
@@ -72,17 +61,18 @@ async def main() -> None:
         custom_request_id_suffix = custom_request_id_suffix
     )
                 
-    # web_surfer = MultimodalWebSurfer(
-    #     name="WebSurfer",
-    #     model_client = web_surfer_client,
-    #     downloads_folder=os.getcwd(),
-    #     debug_dir="logs",
-    #     to_save_screenshots=True,
-    # )
+    web_surfer = MultimodalWebSurfer(
+        name="WebSurfer",
+        model_client = web_surfer_client,
+        downloads_folder=os.getcwd(),
+        debug_dir="logs",
+        to_save_screenshots=True,
+        custom_request_id_suffix = custom_request_id_suffix
+    )
 
     team = MagenticOneGroupChat(
-        # [coder, executor, file_surfer, web_surfer],
-        [coder, executor, file_surfer],
+        [coder, executor, file_surfer, web_surfer],
+        # [coder, executor, file_surfer],
         model_client=orchestrator_client,
         max_turns=20, ### 20 initially
         final_answer_prompt= f""",
@@ -108,18 +98,20 @@ If you are asked for a comma separated list, apply the above rules depending on 
         filename_prompt = f"The question is about a file, document or image, which can be accessed by the filename '{filename}' in the current working directory."
     task = f"{prompt}\n\n{filename_prompt}"
 
-    # # Run the task
-
+    # # # Run the task
     # stream = team.run_stream(task=task.strip())
     # await Console(stream, output_stats=True)
+
     import time
     start_time = time.perf_counter()
     stream = team.run_stream(task=task.strip())
-    await Console(stream)
-    # await Console(stream, output_stats=True)
+    # await Console(stream)
+    await Console(stream, output_stats=True)
     end_time = time.perf_counter()
     elapsed = end_time - start_time
 
+    print(f"Task start time: ", start_time)
+    print(f"Task end time: ", end_time)
     print(f"Task completed in {elapsed:.3f} seconds")
 
 if __name__ == "__main__":

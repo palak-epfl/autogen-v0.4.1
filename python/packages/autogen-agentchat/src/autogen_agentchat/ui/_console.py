@@ -115,6 +115,9 @@ async def Console(
     streaming_chunks: List[str] = []
 
     async for message in stream:
+        # print("PALAK: (console) IS THIS RAW MESSAGE? ", message)
+        # print("PALAK: (console) message.inner_messages: ", message.inner_messages)
+        # input("PRESS ENTER TO CONTINUE...")
         if isinstance(message, TaskResult):
             duration = time.time() - start_time
             if output_stats:

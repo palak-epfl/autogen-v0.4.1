@@ -29,40 +29,41 @@
 #        family: r1
 #
 
-# #############################
-# # vllm model configuration #
-# #############################
-# model_config: &client
-#    provider: autogen_ext.models.openai.OpenAIChatCompletionClient
-#    config:
-#     #  model: openai/gpt-oss-120b
-#      model: openai/gpt-oss-120b
-#      base_url: http://localhost:8000/v1/
-#      api_key: vllm
-#      model_info:
-#        function_calling: true
-#        json_output: true
-#        vision: false
-#        family: oss
-#        structured_output: true
-
 #############################
 # vllm model configuration #
 #############################
 model_config: &client
    provider: autogen_ext.models.openai.OpenAIChatCompletionClient
    config:
-     model: meta-llama/Llama-4-Scout-17B-16E-Instruct
-    #  base_url: http://localhost:8000/v1/
+    #  model: openai/gpt-oss-120b
+     model: openai/gpt-oss-120b
      base_url: http://localhost:8000/v1/
      api_key: vllm
      model_info:
        function_calling: true
-      #  json_output: true
-       json_output: false
-       vision: true
-       family: llama-4-scout
+       json_output: true
+       vision: false
+       family: gpt-oss-120b
        structured_output: true
+
+# #############################
+# # vllm model configuration #
+# #############################
+# model_config: &client
+#    provider: autogen_ext.models.openai.OpenAIChatCompletionClient
+#    config:
+#      model: meta-llama/Llama-4-Scout-17B-16E-Instruct
+#     #  base_url: http://localhost:8000/v1/
+#      base_url: http://localhost:8000/v1/
+#      api_key: vllm
+#      model_info:
+#        function_calling: true
+#       #  json_output: true
+#        json_output: false
+#        vision: false ##### temp change
+#       #  vision: true
+#        family: llama-4-scout
+#        structured_output: true
 
 #######################
 # Used by MagenticOne #

@@ -336,6 +336,7 @@ class BaseGroupChat(Team, ABC, ComponentBase[BaseModel]):
 
             asyncio.run(main())
         """
+        # print("PALAK: inside _base_group_chat's run method: ")
         result: TaskResult | None = None
         async for message in self.run_stream(
             task=task,
@@ -452,6 +453,9 @@ class BaseGroupChat(Team, ABC, ComponentBase[BaseModel]):
             asyncio.run(main())
 
         """
+
+        # print("PALAK: inside BaseGroupChat run_stream method")
+        # print("PALAK: BaseGroupChat task: ", task)
         # Create the messages list if the task is a string or a chat message.
         messages: List[BaseChatMessage] | None = None
         if task is None:
@@ -480,6 +484,7 @@ class BaseGroupChat(Team, ABC, ComponentBase[BaseModel]):
                         "custom_message_types list when creating the team."
                     )
 
+        # print("PALAK: here's the list of messages: ", messages)
         if self._is_running:
             raise ValueError("The team is already running, it cannot run again until it is stopped.")
         self._is_running = True
@@ -560,6 +565,7 @@ class BaseGroupChat(Team, ABC, ComponentBase[BaseModel]):
                     continue
                 output_messages.append(message)
 
+            # print("PALAK: baseGroupChat output_messages: ", output_messages, stop_reason) ##### It is just text message; I need one with tool calls and function calls also!
             # Yield the final result.
             yield TaskResult(messages=output_messages, stop_reason=stop_reason)
 

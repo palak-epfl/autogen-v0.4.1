@@ -12,6 +12,9 @@ from .config import (
     OpenAIClientConfigurationConfigModel,
 )
 
+#### PALAK's change
+from .palaks_poisson_dispatcher import RequestItem, dispatcher, ensure_dispatcher, PALAK_QUEUE, enqueue_request, PALAK_record_step
+
 __all__ = [
     "OpenAIChatCompletionClient",
     "AzureOpenAIChatCompletionClient",

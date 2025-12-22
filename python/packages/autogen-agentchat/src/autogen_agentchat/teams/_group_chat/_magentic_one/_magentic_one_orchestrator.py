@@ -169,7 +169,7 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
             UserMessage(content=self._get_task_ledger_facts_prompt(self._task), source=self._name)
         )
 
-        print("PALAK: palak_orchestrator_gather_facts")
+        # print("PALAK: palak_orchestrator_gather_facts")
         response = await self._model_client.create(
             self._get_compatible_context(planning_conversation), cancellation_token=ctx.cancellation_token, custom_request_id=f"palak_orchestrator_gather_facts_{self._custom_request_id_suffix}"
         )
@@ -184,7 +184,7 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
             UserMessage(content=self._get_task_ledger_plan_prompt(self._team_description), source=self._name)
         )
 
-        print("PALAK: palak_orchestrator_create_plan")
+        # print("PALAK: palak_orchestrator_create_plan")
         response = await self._model_client.create(
             self._get_compatible_context(planning_conversation), cancellation_token=ctx.cancellation_token, custom_request_id=f"palak_orchestrator_create_plan_{self._custom_request_id_suffix}"
         )
@@ -324,17 +324,17 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         key_error: bool = False
         for _ in range(self._max_json_retries):
             if self._model_client.model_info.get("structured_output", False):
-                print("PALAK: palak_orchestrator_progress_ledger_so")
+                # print("PALAK: palak_orchestrator_progress_ledger_so")
                 response = await self._model_client.create(
                     self._get_compatible_context(context), json_output=LedgerEntry, custom_request_id=f"palak_orchestrator_progress_ledger_so_{self._custom_request_id_suffix}"
                 )
             elif self._model_client.model_info.get("json_output", False):
-                print("PALAK: palak_orchestrator_progress_ledger_jo")
+                # print("PALAK: palak_orchestrator_progress_ledger_jo")
                 response = await self._model_client.create(
                     self._get_compatible_context(context), cancellation_token=cancellation_token, json_output=True, custom_request_id=f"palak_orchestrator_progress_ledger_jo_{self._custom_request_id_suffix}"
                 )
             else:
-                print("PALAK: palak_orchestrator_progress_ledger")
+                # print("PALAK: palak_orchestrator_progress_ledger")
                 response = await self._model_client.create(
                     self._get_compatible_context(context), cancellation_token=cancellation_token, custom_request_id=f"palak_orchestrator_progress_ledger_{self._custom_request_id_suffix}"
                 )
@@ -466,7 +466,7 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         update_facts_prompt = self._get_task_ledger_facts_update_prompt(self._task, self._facts)
         context.append(UserMessage(content=update_facts_prompt, source=self._name))
 
-        print("PALAK: palak_orchestrator_update_facts")
+        # print("PALAK: palak_orchestrator_update_facts")
         response = await self._model_client.create(
             self._get_compatible_context(context), cancellation_token=cancellation_token, custom_request_id=f"palak_orchestrator_update_facts_{self._custom_request_id_suffix}"
         )
@@ -479,7 +479,7 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         update_plan_prompt = self._get_task_ledger_plan_update_prompt(self._team_description)
         context.append(UserMessage(content=update_plan_prompt, source=self._name))
 
-        print("PALAK: palak_orchestrator_update_plan")
+        # print("PALAK: palak_orchestrator_update_plan")
         response = await self._model_client.create(
             self._get_compatible_context(context), cancellation_token=cancellation_token, custom_request_id=f"palak_orchestrator_update_plan_{self._custom_request_id_suffix}"
         )
@@ -495,7 +495,7 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
         final_answer_prompt = self._get_final_answer_prompt(self._task)
         context.append(UserMessage(content=final_answer_prompt, source=self._name))
 
-        print("PALAK: palak_orchestrator_prepare_final_ans")
+        # print("PALAK: palak_orchestrator_prepare_final_ans")
         response = await self._model_client.create(
             self._get_compatible_context(context), cancellation_token=cancellation_token, custom_request_id=f"palak_orchestrator_prepare_final_ans_{self._custom_request_id_suffix}"
         )

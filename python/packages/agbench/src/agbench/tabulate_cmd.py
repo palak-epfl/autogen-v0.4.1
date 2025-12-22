@@ -90,7 +90,7 @@ def default_scorer(instance_dir: str, success_strings: List[str] = SUCCESS_STRIN
 def default_timer(instance_dir: str, timer_regex: str = TIMER_REGEX) -> Optional[float]:
     console_log = os.path.join(instance_dir, "console_log.txt")
     if os.path.isfile(console_log):
-        with open(console_log, "rt") as fh:
+        with open(console_log, "rt", encoding="utf-8", errors="ignore") as fh:
             content = fh.read()
 
             # It succeeded
@@ -171,6 +171,13 @@ def default_tabulate(
             instance_dir = os.path.join(task_path, str(instance))
             results[f"Trial {instance} Success"] = scorer(instance_dir)
             results[f"Trial {instance} Time"] = timer(instance_dir)
+            # print("PALAK: instance: ", instance)
+            # print("PALAK: instance_dir: ", instance_dir)
+            # print("PALAK: scorer(instance_dir): ", scorer(instance_dir))
+            with open(f"{instance_dir}/result.txt", "w") as f:
+                f.write(f"{scorer(instance_dir)}")
+                print("result is: ", scorer(instance_dir))
+            # input(".....")
 
         max_instances = max(instances)
 

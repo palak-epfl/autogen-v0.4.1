@@ -773,6 +773,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
             if model_client.model_info["function_calling"] is False:
                 raise ValueError("The model does not support function calling.")
             for tool in tools:
+                # print("PALAK:  assistant_agent tool: ", tool)
                 if isinstance(tool, BaseTool):
                     self._tools.append(tool)
                 elif callable(tool):
@@ -785,6 +786,8 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
                     raise ValueError(f"Unsupported tool type: {type(tool)}")
         # Check if tool names are unique.
         tool_names = [tool.name for tool in self._tools]
+        # print("PALAK:  assistant_agent all tools: ", tool_names) #### empty
+
         if len(tool_names) != len(set(tool_names)):
             raise ValueError(f"Tool names must be unique: {tool_names}")
 
@@ -806,6 +809,9 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         handoff_tool_names = [tool.name for tool in self._handoff_tools]
         if len(handoff_tool_names) != len(set(handoff_tool_names)):
             raise ValueError(f"Handoff names must be unique: {handoff_tool_names}")
+        
+        # print("PALAK:  assistant_agent handoff_tool_names: ", handoff_tool_names) #### empty
+
         # Create sets for faster lookup
         tool_names_set = set(tool_names)
         handoff_tool_names_set = set(handoff_tool_names)
@@ -894,6 +900,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
             Response containing the agent's reply
         """
         async for message in self.on_messages_stream(messages, cancellation_token):
+            # print("PALAK:  assistant agent: incoming message: ", message)
             if isinstance(message, Response):
                 return message
         raise AssertionError("The stream should have returned the final result.")
@@ -1084,7 +1091,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         Returns:
             Generator yielding model results or streaming chunks
         """
-        print("PALAK: inside assistant_agent _call_llm function...")
+        # print("PALAK:  inside assistant_agent _call_llm function...")
         all_messages = await model_context.get_messages()
         llm_messages = cls._get_compatible_context(model_client=model_client, messages=system_messages + all_messages)
 
@@ -1092,8 +1099,6 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
 
         if model_client_stream:
             model_result: Optional[CreateResult] = None
-            print("PALAK: ARE WE EVER HERE? ")
-            input("PRESS ENTER TO CONTINUE...")
             async for chunk in model_client.create_stream(
                 llm_messages,
                 tools=tools,
@@ -1120,9 +1125,12 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
             if custom_request_id:
                 print(f"PALAK: Assistant agent: Request ID: {custom_request_id}")
             else:
-                print("PALAK: Assistant agent: No request ID provided")
+                # print("PALAK:  Assistant agent: No request ID provided")
                 custom_request_id = "unknown"
 
+            # print("PALAK:  Assistant agent message: ", llm_messages)
+            # print("PALAK:  Assistant agent tools: ", tools)
+            # print("PALAK:  cancellation_token: ", cancellation_token)
             model_result = await model_client.create(
                 llm_messages,
                 tools=tools,
@@ -1130,6 +1138,8 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
                 json_output=output_content_type,
                 custom_request_id = custom_request_id
             )
+
+            # print("PALAK:  LLM reply to Assistant agent: ", model_result)
             yield model_result
 
     @classmethod
@@ -1165,8 +1175,10 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         executed_calls_and_results: List[Tuple[FunctionCall, FunctionExecutionResult]] = []
 
         for loop_iteration in range(max_tool_iterations):
+            # print("PALAK:  Assistant agent loop iteration: ", loop_iteration)
             # If direct text response (string), we're done
             if isinstance(current_model_result.content, str):
+                # print("PALAK:  assistant model results is string with output_content_type: ", output_content_type)
                 # Use the passed message ID for the final message
                 if output_content_type:
                     content = output_content_type.model_validate_json(current_model_result.content)
@@ -1193,6 +1205,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
                 return
 
             # Otherwise, we have function calls
+            # print("PALAK:  WE HAVE TOOL CALL IN ASSISTANT AGENT!!!!!!!")
             assert isinstance(current_model_result.content, list) and all(
                 isinstance(item, FunctionCall) for item in current_model_result.content
             )
@@ -1366,6 +1379,7 @@ class AssistantAgent(BaseChatAgent, Component[AssistantAgentConfig]):
         handoff_reqs = [
             call for call in model_result.content if isinstance(call, FunctionCall) and call.name in handoffs
         ]
+        # print("PALAK:  assistant agent handoff_reqs: ", handoff_reqs)
         if len(handoff_reqs) > 0:
             # We have at least one handoff function call
             selected_handoff = handoffs[handoff_reqs[0].name]
