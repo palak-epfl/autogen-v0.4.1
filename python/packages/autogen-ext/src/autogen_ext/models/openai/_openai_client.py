@@ -967,6 +967,7 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         # likely_success = task_id_from_request_id in likely_good_tasks
         likely_success = False #### all same priority
 
+        print("PALAK: likely_success: ", likely_success)
         # task_id_and_subtask_id = custom_request_id.split('_')[-1]
 
         await enqueue_request(

@@ -86,25 +86,44 @@ def main():
 
     # Load the GAIA data
     gaia_validation_tasks = [[], [], []]
-    with open(os.path.join(gaia_validation_files, "metadata.jsonl")) as fh:
-        for line in fh:
-            data = json.loads(line)
-            # gaia_validation_tasks[data["Level"] - 1].append(data)
-            level = int(data["Level"]) - 1
-            gaia_validation_tasks[level].append(data)
+    # with open(os.path.join(gaia_validation_files, "metadata.jsonl")) as fh:
+    #     for line in fh:
+    #         data = json.loads(line)
+    #         # gaia_validation_tasks[data["Level"] - 1].append(data)
+    #         level = int(data["Level"]) - 1
+    #         gaia_validation_tasks[level].append(data)
+    import pandas as pd
+    import pyarrow.parquet as pq
+    parquet_path = os.path.join(gaia_validation_files, "metadata.parquet")
+    df = pd.read_parquet(parquet_path)
+    for _, row in df.iterrows():
+        data = row.to_dict()
+        level = int(data["Level"]) - 1
+        gaia_validation_tasks[level].append(data)
+
+#     gaia_test_tasks = [[], [], []]
+#     with open(os.path.join(gaia_test_files, "metadata.jsonl")) as fh:
+#         for line in fh:
+#             data = json.loads(line)
+
+#             # A welcome message -- not a real task
+#             if data["task_id"] == "0-0-0-0-0":
+#                 continue
+
+#             # gaia_test_tasks[data["Level"] - 1].append(data)
+#             level = int(data["Level"]) - 1
+#             gaia_test_tasks[level].append(data)
 
     gaia_test_tasks = [[], [], []]
-    with open(os.path.join(gaia_test_files, "metadata.jsonl")) as fh:
-        for line in fh:
-            data = json.loads(line)
+    parquet_path = os.path.join(gaia_test_files, "metadata.parquet")
+    table = pq.read_table(parquet_path)
+    for data in table.to_pylist():
+        # Skip welcome message
+        if data.get("task_id") == "0-0-0-0-0":
+            continue
+        level = int(data["Level"]) - 1
+        gaia_test_tasks[level].append(data)
 
-            # A welcome message -- not a real task
-            if data["task_id"] == "0-0-0-0-0":
-                continue
-
-            # gaia_test_tasks[data["Level"] - 1].append(data)
-            level = int(data["Level"]) - 1
-            gaia_test_tasks[level].append(data)
 
     # list all directories in the Templates directory
     # and populate a dictionary with the name and path

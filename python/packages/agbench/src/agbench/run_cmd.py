@@ -58,146 +58,13 @@ class ScenarioInstance(TypedDict):
     values: Dict[str, Dict[str, str]]
 
 ##### PALAK (poisson distribution)
-import os
-import sys
-import json
-import errno
-import random
-from threading import Thread
-
-subsample_rng = random.Random()
-
-def run_scenarios_poisson(
-    scenario: str,
-    n_repeats: int,
-    is_native: bool,
-    config_file: Union[None, str],
-    token_provider: Optional[Callable[[], str]],
-    docker_image: Optional[str] = None,
-    results_dir: str = "Results",
-    subsample: Union[None, int, float] = None,
-    env_file: Union[None, str] = None,
-    poisson_rate: Optional[float] = None,  # NEW: Poisson rate in events/sec
-) -> None:
-    """
-    Run a set of AG-bench scenarios a given number of times.
-    If poisson_rate is set, agentic processes are launched asynchronously
-    at intervals drawn from an exponential distribution.
-    """
-
-    files: List[str] = []
-
-    # Determine scenario files
-    if scenario == "-" or os.path.isfile(scenario):
-        files.append(scenario)
-    elif os.path.isdir(scenario):
-        for f in os.listdir(scenario):
-            scenario_file = os.path.join(scenario, f)
-            if not os.path.isfile(scenario_file):
-                continue
-            if not scenario_file.lower().endswith(".jsonl"):
-                continue
-            files.append(scenario_file)
-    else:
-        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), scenario)
-
-    # Thread list for asynchronous launches
-    threads: List[Thread] = []
-    cumulative_time = 0.0
-
-    # Process all scenario files
-    for scenario_file in files:
-        scenario_name: Optional[str] = None
-        scenario_dir: Optional[str] = None
-        file_handle = None
-
-        if scenario_file == "-":
-            scenario_name = "stdin"
-            scenario_dir = "."
-            file_handle = sys.stdin
-        else:
-            scenario_name_parts = os.path.basename(scenario_file).split(".")
-            scenario_name_parts.pop()
-            scenario_name = ".".join(scenario_name_parts)
-            scenario_dir = os.path.dirname(os.path.realpath(scenario_file))
-            file_handle = open(scenario_file, "rt")
-
-        instances = []
-        for line in file_handle:
-            line = line.strip()
-            if not line:
-                continue
-            instances.append(json.loads(line))
-
-        if scenario_file != "-":
-            file_handle.close()
-
-        # Subsample if needed
-        if subsample is not None:
-            n = int(len(instances) * subsample + 0.5) if 0 <= subsample < 1 else int(subsample)
-            n = max(0, min(n, len(instances)))
-            instances = random.sample(instances, n)
-
-        random.shuffle(instances)
-
-        # # Read all lines, subsample if needed
-        # lines = [line for line in file_handle]
-        # if subsample is not None:
-        #     n = int(len(lines) * subsample + 0.5) if 0 <= subsample < 1 else int(subsample)
-        #     n = max(0, min(n, len(lines)))
-        #     lines = subsample_rng.sample(lines, n)
-
-        # for line in lines:
-        #     instance = json.loads(line)
-        for instance in instances:
-            # Create results directories
-            mkdir_p(results_dir)
-            results_scenario = os.path.join(results_dir, scenario_name)
-            mkdir_p(results_scenario)
-            results_instance = os.path.join(results_scenario, instance["id"])
-            mkdir_p(results_instance)
-
-            for i in range(n_repeats):
-                results_repetition = os.path.join(results_instance, str(i))
-                if os.path.isdir(results_repetition):
-                    print(f"Found folder {results_repetition} ... Skipping.")
-                    continue
-                print(f"Scheduling scenario {results_repetition}")
-
-                # Expand scenario
-                expand_scenario(scenario_dir, instance, results_repetition, config_file)
-
-                # Prepare environment
-                env = get_scenario_env(token_provider=token_provider, env_file=env_file)
-
-                # Thread target function
-                def run_scenario_later(results_path, env_vars, delay):
-                    time.sleep(delay)
-                    if is_native:
-                        run_scenario_natively(results_path, env_vars)
-                    else:
-                        run_scenario_in_docker(results_path, env_vars, docker_image=docker_image)
-
-                # Poisson delay
-                delay = 0.0
-                if poisson_rate is not None and poisson_rate > 0:
-                    wait_time = random.expovariate(poisson_rate)
-                    cumulative_time += wait_time
-                    delay = cumulative_time
-
-                # Launch asynchronously
-                t = Thread(target=run_scenario_later, args=(results_repetition, env, delay))
-                t.start()
-                threads.append(t)
-
-        # if scenario_file != "-":
-        #     file_handle.close()
-
-    # Wait for all launched threads to finish
-    for t in threads:
-        t.join()
-
-
+# import os
+# import sys
+# import json
+# import errno
+# import random
+# from threading import Thread
+# subsample_rng = random.Random()
 # def run_scenarios_poisson(
 #     scenario: str,
 #     n_repeats: int,
@@ -253,16 +120,34 @@ def run_scenarios_poisson(
 #             scenario_dir = os.path.dirname(os.path.realpath(scenario_file))
 #             file_handle = open(scenario_file, "rt")
 
-#         # Read all lines, subsample if needed
-#         lines = [line for line in file_handle]
+#         instances = []
+#         for line in file_handle:
+#             line = line.strip()
+#             if not line:
+#                 continue
+#             instances.append(json.loads(line))
+
+#         if scenario_file != "-":
+#             file_handle.close()
+
+#         # Subsample if needed
 #         if subsample is not None:
-#             n = int(len(lines) * subsample + 0.5) if 0 <= subsample < 1 else int(subsample)
-#             n = max(0, min(n, len(lines)))
-#             lines = subsample_rng.sample(lines, n)
+#             n = int(len(instances) * subsample + 0.5) if 0 <= subsample < 1 else int(subsample)
+#             n = max(0, min(n, len(instances)))
+#             instances = random.sample(instances, n)
 
-#         for line in lines:
-#             instance = json.loads(line)
+#         random.shuffle(instances)
 
+#         # # Read all lines, subsample if needed
+#         # lines = [line for line in file_handle]
+#         # if subsample is not None:
+#         #     n = int(len(lines) * subsample + 0.5) if 0 <= subsample < 1 else int(subsample)
+#         #     n = max(0, min(n, len(lines)))
+#         #     lines = subsample_rng.sample(lines, n)
+
+#         # for line in lines:
+#         #     instance = json.loads(line)
+#         for instance in instances:
 #             # Create results directories
 #             mkdir_p(results_dir)
 #             results_scenario = os.path.join(results_dir, scenario_name)
@@ -303,123 +188,147 @@ def run_scenarios_poisson(
 #                 t.start()
 #                 threads.append(t)
 
-#         if scenario_file != "-":
-#             file_handle.close()
+#         # if scenario_file != "-":
+#         #     file_handle.close()
 
 #     # Wait for all launched threads to finish
 #     for t in threads:
 #         t.join()
 
+import os
+import sys
+import time
+import json
+import random
+from multiprocessing import Process
+from typing import Optional, Union, Callable, Dict
 
-# def run_scenarios_parallel(
-#     scenario: str,
-#     n_repeats: int,
-#     is_native: bool,
-#     config_file: Union[None, str],
-#     token_provider: Optional[Callable[[], str]],
-#     docker_image: Optional[str] = None,
-#     results_dir: str = "Results",
-#     subsample: Union[None, int, float] = None,
-#     env_file: Union[None, str] = None,
-# ) -> None:
-#     """
-#     Launch all AG-bench scenarios in parallel.
+def run_scenarios_poisson_independent(
+    scenario: str,
+    n_repeats: int,
+    is_native: bool,
+    config_file: Union[None, str] = None,
+    token_provider: Optional[Callable[[], str]] = None,
+    docker_image: Optional[str] = None,
+    results_dir: str = "Results",
+    subsample: Union[None, int, float] = None,
+    env_file: Union[None, str] = None,
+    poisson_rate: float = 0.1,  # events/sec
+) -> None:
+    """
+    Run each scenario instance in its own process, scheduled according to a Poisson distribution.
+    """
 
-#     NOTE:
-#     - No Poisson logic here.
-#     - Arrival control should happen when LLM calls are made.
-#     """
+    # -----------------------------
+    # Determine scenario files
+    # -----------------------------
+    files = []
+    if scenario == "-" or os.path.isfile(scenario):
+        files.append(scenario)
+    elif os.path.isdir(scenario):
+        for f in os.listdir(scenario):
+            path = os.path.join(scenario, f)
+            if os.path.isfile(path) and path.lower().endswith(".jsonl"):
+                files.append(path)
+    else:
+        raise FileNotFoundError(scenario)
 
-#     files: List[str] = []
+    if not files:
+        print("No scenario files found.")
+        return
 
-#     # Determine scenario files
-#     if scenario == "-" or os.path.isfile(scenario):
-#         files.append(scenario)
-#     elif os.path.isdir(scenario):
-#         for f in os.listdir(scenario):
-#             scenario_file = os.path.join(scenario, f)
-#             if (
-#                 os.path.isfile(scenario_file)
-#                 and scenario_file.lower().endswith(".jsonl")
-#             ):
-#                 files.append(scenario_file)
-#     else:
-#         raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), scenario)
+    cumulative_time = 0.0
+    start_time = time.time()
 
-#     threads: List[Thread] = []
+    processes = []
 
-#     # Process all scenario files
-#     for scenario_file in files:
-#         if scenario_file == "-":
-#             scenario_name = "stdin"
-#             scenario_dir = "."
-#             file_handle = sys.stdin
-#         else:
-#             scenario_name = os.path.splitext(os.path.basename(scenario_file))[0]
-#             scenario_dir = os.path.dirname(os.path.realpath(scenario_file))
-#             file_handle = open(scenario_file, "rt")
+    # -----------------------------
+    # Loop over all scenario files
+    # -----------------------------
+    for scenario_file in files:
+        if scenario_file == "-":
+            scenario_name = "stdin"
+            scenario_dir = "."
+            file_handle = sys.stdin
+        else:
+            scenario_name = os.path.splitext(os.path.basename(scenario_file))[0]
+            scenario_dir = os.path.dirname(os.path.realpath(scenario_file))
+            file_handle = open(scenario_file, "rt")
 
-#         # Read & subsample
-#         lines = list(file_handle)
-#         if subsample is not None:
-#             n = int(len(lines) * subsample + 0.5) if 0 <= subsample < 1 else int(subsample)
-#             n = max(0, min(n, len(lines)))
-#             lines = subsample_rng.sample(lines, n)
+        # Read all instances
+        instances = [json.loads(line.strip()) for line in file_handle if line.strip()]
 
-#         for line in lines:
-#             instance = json.loads(line)
+        if scenario_file != "-":
+            file_handle.close()
 
-#             # Create results directories
-#             mkdir_p(results_dir)
-#             results_scenario = os.path.join(results_dir, scenario_name)
-#             mkdir_p(results_scenario)
-#             results_instance = os.path.join(results_scenario, instance["id"])
-#             mkdir_p(results_instance)
+        # Subsample if needed
+        if subsample is not None:
+            n = int(len(instances) * subsample + 0.5) if 0 < subsample < 1 else int(subsample)
+            n = max(0, min(n, len(instances)))
+            instances = random.sample(instances, n)
 
-#             for i in range(n_repeats):
-#                 results_repetition = os.path.join(results_instance, str(i))
-#                 if os.path.isdir(results_repetition):
-#                     print(f"Found folder {results_repetition} ... Skipping.")
-#                     continue
+        # print("PALAK: instances before shuffling: ", instances)
+        random.shuffle(instances)
+        # print("PALAK: instances after shuffling: ", instances)
 
-#                 print(f"Launching scenario {results_repetition}")
 
-#                 expand_scenario(
-#                     scenario_dir,
-#                     instance,
-#                     results_repetition,
-#                     config_file,
-#                 )
+        # -----------------------------
+        # Launch each instance
+        # -----------------------------
+        for instance in instances:
+            scenario_result_dir = os.path.join(results_dir, scenario_name)
+            os.makedirs(scenario_result_dir, exist_ok=True)
 
-#                 env = get_scenario_env(
-#                     token_provider=token_provider,
-#                     env_file=env_file,
-#                 )
+            results_instance = os.path.join(scenario_result_dir, instance["id"])
+            os.makedirs(results_instance, exist_ok=True)
 
-#                 def run_scenario(results_path, env_vars):
-#                     if is_native:
-#                         run_scenario_natively(results_path, env_vars)
-#                     else:
-#                         run_scenario_in_docker(
-#                             results_path,
-#                             env_vars,
-#                             docker_image=docker_image,
-#                         )
+            for i in range(n_repeats):
+                results_repetition = os.path.join(results_instance, str(i))
 
-#                 t = Thread(
-#                     target=run_scenario,
-#                     args=(results_repetition, env),
-#                     daemon=True,
-#                 )
-#                 t.start()
-#                 threads.append(t)
+                # Skip it if it already exists
+                if os.path.isdir(results_repetition):
+                    print(f"Found folder {results_repetition} ... Skipping.")
+                    continue
+                print(f"Running scenario {results_repetition}")
 
-#         if scenario_file != "-":
-#             file_handle.close()
+                # Expand the scenario
+                expand_scenario(scenario_dir, instance, results_repetition, config_file)
 
-#     # Wait for all agents to finish
-#     for t in threads:
-#         t.join()
+                # Prepare environment
+                env = get_scenario_env(token_provider=token_provider, env_file=env_file)
+
+                # Poisson delay
+                wait_time = random.expovariate(poisson_rate)
+                cumulative_time += wait_time
+                scheduled_start = start_time + cumulative_time
+                delay = max(0, scheduled_start - time.time())
+
+                print(f" -> Will start in {delay:.2f}s")
+
+                # -----------------------------
+                # Worker function for each process
+                # -----------------------------
+                def worker(results_path, env_vars, delay_time):
+                    time.sleep(delay_time)
+                    if is_native:
+                        run_scenario_natively(results_path, env_vars)
+                    else:
+                        run_scenario_in_docker(results_path, env_vars, docker_image=docker_image)
+
+                # -----------------------------
+                # Launch process
+                # -----------------------------
+                p = Process(target=worker, args=(results_repetition, env, delay))
+                p.start()
+
+                processes.append(p)
+
+    # -----------------------------
+    # Wait for all processes to finish
+    # -----------------------------
+    for p in processes:
+        p.join()
+
 
 
 
@@ -1391,20 +1300,12 @@ def run_cli(args: Sequence[str]) -> None:
     if parsed_args.parallel > 1:
         run_parallel(parsed_args)
     else:
-        # run_scenarios(
+
+        import time
+        start_time = time.time()
+        # run_scenarios_poisson(
         #     scenario=parsed_args.scenario,
-        #     n_repeats=parsed_args.repeat,
-        #     # n_repeats=1,
-        #     is_native=True if parsed_args.native else False,
-        #     config_file=parsed_args.config,
-        #     token_provider=azure_token_provider,
-        #     docker_image=parsed_args.docker_image,
-        #     subsample=subsample,
-        #     env_file=parsed_args.env,
-        # )
-        
-        # run_scenarios_parallel(
-        #     scenario=parsed_args.scenario,
+        #     # n_repeats=parsed_args.repeat,
         #     n_repeats=3,
         #     is_native=True if parsed_args.native else False,
         #     config_file=parsed_args.config,
@@ -1412,25 +1313,20 @@ def run_cli(args: Sequence[str]) -> None:
         #     docker_image=parsed_args.docker_image,
         #     subsample=subsample,
         #     env_file=parsed_args.env,
+        #     poisson_rate=1
         # )
 
-        import time
-        start_time = time.time()
-        run_scenarios_poisson(
+        run_scenarios_poisson_independent(
             scenario=parsed_args.scenario,
-            # n_repeats=parsed_args.repeat,
-            n_repeats=3,
+            n_repeats=1,
             is_native=True if parsed_args.native else False,
             config_file=parsed_args.config,
             token_provider=azure_token_provider,
             docker_image=parsed_args.docker_image,
             subsample=subsample,
             env_file=parsed_args.env,
-            # poisson_rate=16.0
-            # poisson_rate=40.0
-            poisson_rate=8.0
-            # poisson_rate=4.0
-        )
+            poisson_rate=16
+        ) 
         end_time = time.time()
         elapsed_seconds = end_time - start_time
         print(f"start time: ", start_time)
