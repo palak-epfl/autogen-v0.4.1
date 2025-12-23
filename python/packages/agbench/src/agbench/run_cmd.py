@@ -267,107 +267,104 @@ def run_scenarios_poisson_independent(
             n = max(0, min(n, len(instances)))
             instances = random.sample(instances, n)
 
-        random.shuffle(instances)
-        # -----------------------------
-        # Launch each instance
-        # -----------------------------
-        for instance in instances:
-            scenario_result_dir = os.path.join(results_dir, scenario_name)
-            os.makedirs(scenario_result_dir, exist_ok=True)
-
-            results_instance = os.path.join(scenario_result_dir, instance["id"])
-            os.makedirs(results_instance, exist_ok=True)
-
-            for i in range(n_repeats):
-                results_repetition = os.path.join(results_instance, str(i))
-
-                # Skip it if it already exists
-                if os.path.isdir(results_repetition):
-                    print(f"Found folder {results_repetition} ... Skipping.")
-                    continue
-                print(f"Running scenario {results_repetition}")
-
-                # Expand the scenario
-                expand_scenario(scenario_dir, instance, results_repetition, config_file)
-
-                # Prepare environment
-                env = get_scenario_env(token_provider=token_provider, env_file=env_file)
-
-                # Poisson delay
-                wait_time = random.expovariate(poisson_rate)
-                cumulative_time += wait_time
-                scheduled_start = start_time + cumulative_time
-                delay = max(0, scheduled_start - time.time())
-
-                print(f" -> Will start in {delay:.2f}s")
-
-                # -----------------------------
-                # Worker function for each process
-                # -----------------------------
-                def worker(results_path, env_vars, delay_time):
-                    time.sleep(delay_time)
-                    if is_native:
-                        run_scenario_natively(results_path, env_vars)
-                    else:
-                        run_scenario_in_docker(results_path, env_vars, docker_image=docker_image)
-
-                # -----------------------------
-                # Launch process
-                # -----------------------------
-                p = Process(target=worker, args=(results_repetition, env, delay))
-                p.start()
-
-                processes.append(p)
-
-
-        # # -----------------------------
-        # # Build flat task list
-        # # -----------------------------
-        # tasks = []
+        # random.shuffle(instances)
         # for instance in instances:
-        #     for i in range(n_repeats):
-        #         tasks.append((instance, i))
-
-        # # TRUE randomness happens here
-        # random.shuffle(tasks)
-
-        # # -----------------------------
-        # # Launch each task
-        # # -----------------------------
-        # for instance, i in tasks:
         #     scenario_result_dir = os.path.join(results_dir, scenario_name)
         #     os.makedirs(scenario_result_dir, exist_ok=True)
 
         #     results_instance = os.path.join(scenario_result_dir, instance["id"])
         #     os.makedirs(results_instance, exist_ok=True)
 
-        #     results_repetition = os.path.join(results_instance, str(i))
+        #     for i in range(n_repeats):
+        #         results_repetition = os.path.join(results_instance, str(i))
 
-        #     if os.path.isdir(results_repetition):
-        #         print(f"Found folder {results_repetition} ... Skipping.")
-        #         continue
+        #         # Skip it if it already exists
+        #         if os.path.isdir(results_repetition):
+        #             print(f"Found folder {results_repetition} ... Skipping.")
+        #             continue
+        #         print(f"Running scenario {results_repetition}")
 
-        #     print(f"Running scenario {results_repetition}")
+        #         # Expand the scenario
+        #         expand_scenario(scenario_dir, instance, results_repetition, config_file)
 
-        #     expand_scenario(scenario_dir, instance, results_repetition, config_file)
+        #         # Prepare environment
+        #         env = get_scenario_env(token_provider=token_provider, env_file=env_file)
 
-        #     env = get_scenario_env(token_provider=token_provider, env_file=env_file)
+        #         # Poisson delay
+        #         wait_time = random.expovariate(poisson_rate)
+        #         cumulative_time += wait_time
+        #         scheduled_start = start_time + cumulative_time
+        #         delay = max(0, scheduled_start - time.time())
 
-        #     wait_time = random.expovariate(poisson_rate)
-        #     cumulative_time += wait_time
-        #     scheduled_start = start_time + cumulative_time
-        #     delay = max(0, scheduled_start - time.time())
+        #         print(f" -> Will start in {delay:.2f}s")
 
-        #     def worker(results_path, env_vars, delay_time):
-        #         time.sleep(delay_time)
-        #         if is_native:
-        #             run_scenario_natively(results_path, env_vars)
-        #         else:
-        #             run_scenario_in_docker(results_path, env_vars, docker_image=docker_image)
+        #         # -----------------------------
+        #         # Worker function for each process
+        #         # -----------------------------
+        #         def worker(results_path, env_vars, delay_time):
+        #             time.sleep(delay_time)
+        #             if is_native:
+        #                 run_scenario_natively(results_path, env_vars)
+        #             else:
+        #                 run_scenario_in_docker(results_path, env_vars, docker_image=docker_image)
 
-        #     p = Process(target=worker, args=(results_repetition, env, delay))
-        #     p.start()
-        #     processes.append(p)
+        #         # -----------------------------
+        #         # Launch process
+        #         # -----------------------------
+        #         p = Process(target=worker, args=(results_repetition, env, delay))
+        #         p.start()
+
+        #         processes.append(p)
+
+
+        # -----------------------------
+        # Build flat task list
+        # -----------------------------
+        tasks = []
+        for instance in instances:
+            for i in range(n_repeats):
+                tasks.append((instance, i))
+
+        # TRUE randomness happens here
+        random.shuffle(tasks)
+
+        # -----------------------------
+        # Launch each task
+        # -----------------------------
+        for instance, i in tasks:
+            scenario_result_dir = os.path.join(results_dir, scenario_name)
+            os.makedirs(scenario_result_dir, exist_ok=True)
+
+            results_instance = os.path.join(scenario_result_dir, instance["id"])
+            os.makedirs(results_instance, exist_ok=True)
+
+            results_repetition = os.path.join(results_instance, str(i))
+
+            if os.path.isdir(results_repetition):
+                print(f"Found folder {results_repetition} ... Skipping.")
+                continue
+
+            print(f"Running scenario {results_repetition}")
+
+            expand_scenario(scenario_dir, instance, results_repetition, config_file)
+
+            env = get_scenario_env(token_provider=token_provider, env_file=env_file)
+
+            wait_time = random.expovariate(poisson_rate)
+            cumulative_time += wait_time
+            scheduled_start = start_time + cumulative_time
+            delay = max(0, scheduled_start - time.time())
+
+            def worker(results_path, env_vars, delay_time):
+                time.sleep(delay_time)
+                if is_native:
+                    run_scenario_natively(results_path, env_vars)
+                else:
+                    run_scenario_in_docker(results_path, env_vars, docker_image=docker_image)
+
+            p = Process(target=worker, args=(results_repetition, env, delay))
+            p.start()
+            processes.append(p)
 
 
 
@@ -1366,14 +1363,14 @@ def run_cli(args: Sequence[str]) -> None:
 
         run_scenarios_poisson_independent(
             scenario=parsed_args.scenario,
-            n_repeats=1,
+            n_repeats=3,
             is_native=True if parsed_args.native else False,
             config_file=parsed_args.config,
             token_provider=azure_token_provider,
             docker_image=parsed_args.docker_image,
             subsample=subsample,
             env_file=parsed_args.env,
-            poisson_rate=16
+            poisson_rate=64
         ) 
         end_time = time.time()
         elapsed_seconds = end_time - start_time
