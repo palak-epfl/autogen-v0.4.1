@@ -1346,21 +1346,18 @@ def run_cli(args: Sequence[str]) -> None:
         run_parallel(parsed_args)
     else:
 
-        import time
-        start_time = time.time()
-        # run_scenarios_poisson(
+        # import time
+        # start_time = time.time()
+        # run_scenarios(
         #     scenario=parsed_args.scenario,
-        #     # n_repeats=parsed_args.repeat,
-        #     n_repeats=3,
+        #     n_repeats=parsed_args.repeat,
         #     is_native=True if parsed_args.native else False,
         #     config_file=parsed_args.config,
         #     token_provider=azure_token_provider,
         #     docker_image=parsed_args.docker_image,
         #     subsample=subsample,
         #     env_file=parsed_args.env,
-        #     poisson_rate=1
         # )
-
         run_scenarios_poisson_independent(
             scenario=parsed_args.scenario,
             n_repeats=1,
@@ -1370,7 +1367,7 @@ def run_cli(args: Sequence[str]) -> None:
             docker_image=parsed_args.docker_image,
             subsample=subsample,
             env_file=parsed_args.env,
-            poisson_rate=64
+            poisson_rate=0.1
         ) 
         end_time = time.time()
         elapsed_seconds = end_time - start_time

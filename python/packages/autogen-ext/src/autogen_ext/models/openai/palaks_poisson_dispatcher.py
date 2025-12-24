@@ -16,8 +16,16 @@ class RequestItem:
 
 async def dispatcher():
     while True:
+        # print("PALAK_QUEUE size before get:", PALAK_QUEUE.qsize())
+        # priority, item = await PALAK_QUEUE.get()
+        # print("PALAK_QUEUE size after get:", PALAK_QUEUE.qsize())
+
+        print("PALAK_QUEUE size before sleep:", PALAK_QUEUE.qsize())
+        await asyncio.sleep(1)
         print("PALAK_QUEUE size before get:", PALAK_QUEUE.qsize())
+        await asyncio.sleep(1)
         priority, item = await PALAK_QUEUE.get()
+        print("PALAK_QUEUE item: ", priority, item)
         print("PALAK_QUEUE size after get:", PALAK_QUEUE.qsize())
         if item is None:
             break
