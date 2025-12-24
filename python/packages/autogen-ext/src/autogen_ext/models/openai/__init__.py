@@ -13,7 +13,7 @@ from .config import (
 )
 
 #### PALAK's change
-from .palaks_poisson_dispatcher import RequestItem, dispatcher, ensure_dispatcher, PALAK_QUEUE, enqueue_request, PALAK_record_step
+from .palaks_poisson_dispatcher import RequestItem, dispatcher, ensure_dispatcher, PALAK_QUEUE, enqueue_request, PALAK_record_step_per_task
 
 __all__ = [
     "OpenAIChatCompletionClient",
