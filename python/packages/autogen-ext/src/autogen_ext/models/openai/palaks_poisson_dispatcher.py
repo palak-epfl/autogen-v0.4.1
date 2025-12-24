@@ -16,8 +16,9 @@ class RequestItem:
 
 async def dispatcher():
     while True:
+        print("PALAK_QUEUE size before get:", PALAK_QUEUE.qsize())
         priority, item = await PALAK_QUEUE.get()
-
+        print("PALAK_QUEUE size after get:", PALAK_QUEUE.qsize())
         if item is None:
             break
 
@@ -43,23 +44,20 @@ async def enqueue_request(
     is_high_priority: bool = False,
 ):
 
-    try:
-        # task_id_from_request_id = custom_request_id.split(':', 1)[0].rsplit('_', 1)[-1]
-        task_id_from_request_id = custom_request_id.rsplit("_", 1)[-1]
-    except Exception:
-        task_id_from_request_id = none
-
-    if task_id_from_request_id not in PALAK_record_step_per_task:
-        PALAK_record_step_per_task[task_id_from_request_id] = 0   
-    PALAK_record_step_per_task[task_id_from_request_id] += 1
-
-    print(f"PALAK: current step count of task_id {task_id_from_request_id} is {PALAK_record_step_per_task[task_id_from_request_id]}")
-
-    if PALAK_record_step_per_task[task_id_from_request_id] > 30:
-        priority = 1
-    else:
-        priority = 0
+    # try:
+    #     # task_id_from_request_id = custom_request_id.split(':', 1)[0].rsplit('_', 1)[-1]
+    #     task_id_from_request_id = custom_request_id.rsplit("_", 1)[-1]
+    # except Exception:
+    #     task_id_from_request_id = none
+    # if task_id_from_request_id not in PALAK_record_step_per_task:
+    #     PALAK_record_step_per_task[task_id_from_request_id] = 0   
+    # PALAK_record_step_per_task[task_id_from_request_id] += 1
+    # print(f"PALAK: current step count of task_id {task_id_from_request_id} is {PALAK_record_step_per_task[task_id_from_request_id]}")
+    # if PALAK_record_step_per_task[task_id_from_request_id] > 30:
+    #     priority = 1
+    # else:
+    #     priority = 0
 
     # Lower number = higher priority
-    # priority = 0 if is_high_priority else 1
+    priority = 0 if is_high_priority else 1
     await PALAK_QUEUE.put((priority, RequestItem(send, future, request_id)))
