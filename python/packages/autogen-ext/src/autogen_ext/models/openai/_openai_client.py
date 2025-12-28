@@ -526,6 +526,10 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         self._total_usage = RequestUsage(prompt_tokens=0, completion_tokens=0)
         self._actual_usage = RequestUsage(prompt_tokens=0, completion_tokens=0)
 
+        ##### PALAK
+        self.PALAK_TASK_STEP_COUNT = {}
+
+
     @classmethod
     def create_from_config(cls, config: Dict[str, Any]) -> ChatCompletionClient:
         return OpenAIChatCompletionClient(**config)
@@ -703,6 +707,9 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             create_args=create_args,
         )
 
+
+    #### PALAK
+    # PALAK_TASK_STEP_COUNT = {}
     async def create(
         self,
         messages: Sequence[LLMMessage],
@@ -729,15 +736,33 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
         # enqueue instead of sending immediately
-        likely_good_tasks = {'11af4e1a-5f45-467d-9aeb-46f4bb0bf034', '389793a7-ca17-4e82-81cb-2b3a2391b4b9', 'f918266a-b3e0-4914-865d-4faa564f1aef', 'a1e91b78-d3d8-4675-bb8d-62741b4b68a6', '27d5d136-8563-469e-92bf-fd103c28b57c', '2d83110e-a098-4ebb-9987-066c06fa42d0', 'cffe0e32-c9a6-4c52-9877-78ceb4aaa9fb', 'c714ab3a-da30-4603-bacd-d008800188b9', 'a3fbeb63-0e8c-4a11-bff6-0e3b484c3e9c', 'cf106601-ab4f-4af9-b045-5295fe67b37d', 'dc28cf18-6431-458b-83ef-64b3ce566c10', '50ad0280-0819-4bd9-b275-5de32d3b5bcb', '6f37996b-2ac7-44b0-8e68-6d28256631b4'}
-        try:
-            task_id_from_request_id = custom_request_id.split(':', 1)[0].rsplit('_', 1)[-1]
-        except Exception:
-            task_id_from_request_id = none
+        # likely_good_tasks = {'11af4e1a-5f45-467d-9aeb-46f4bb0bf034', '389793a7-ca17-4e82-81cb-2b3a2391b4b9', 'f918266a-b3e0-4914-865d-4faa564f1aef', 'a1e91b78-d3d8-4675-bb8d-62741b4b68a6', '27d5d136-8563-469e-92bf-fd103c28b57c', '2d83110e-a098-4ebb-9987-066c06fa42d0', 'cffe0e32-c9a6-4c52-9877-78ceb4aaa9fb', 'c714ab3a-da30-4603-bacd-d008800188b9', 'a3fbeb63-0e8c-4a11-bff6-0e3b484c3e9c', 'cf106601-ab4f-4af9-b045-5295fe67b37d', 'dc28cf18-6431-458b-83ef-64b3ce566c10', '50ad0280-0819-4bd9-b275-5de32d3b5bcb', '6f37996b-2ac7-44b0-8e68-6d28256631b4'}
+        # try:
+        #     task_id_from_request_id = custom_request_id.split(':', 1)[0].rsplit('_', 1)[-1]
+        # except Exception:
+        #     task_id_from_request_id = none
+        # task_priority = 0 if task_id_from_request_id in likely_good_tasks else 5
 
-        task_priority = 0 if task_id_from_request_id in likely_good_tasks else 5
 
-        print("PALAK: likely_success: ", likely_success)
+        
+        task_id_from_request_id = custom_request_id.split('_')[-1]
+        print("self.PALAK_TASK_STEP_COUNT: ", self.PALAK_TASK_STEP_COUNT)
+        if task_id_from_request_id not in self.PALAK_TASK_STEP_COUNT:
+            self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] = 0
+        self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] += 1
+
+        task_priority = 0
+        if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 10:
+            task_priority = 2
+            if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 15:
+                task_priority = 4
+                if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 30:
+                    task_priority = 6
+                    if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 45:
+                        task_priority = 8
+
+        # task_priority = 0 if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] <= 30 else 5
+        
 
         if create_params.response_format is not None:
             print(f"PALAK: IMPORTANT: [{ts}] SENT THIS REQUEST: {custom_request_id}")
