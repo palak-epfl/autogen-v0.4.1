@@ -134,6 +134,7 @@ def scorer(instance_dir):
     with open(expected_answer_file, "rt") as fh:
         expected_answer = fh.read().strip()
 
+    print("expected_answer: ", expected_answer)
     # Read the console
     console_log_file = os.path.join(instance_dir, "console_log.txt")
     if not os.path.isfile(console_log_file):
@@ -144,9 +145,14 @@ def scorer(instance_dir):
         console_log = fh.read()
 
         final_answer = None 
-        m = re.search(r"FINAL ANSWER:(.*?)\n", console_log, re.DOTALL)
-        if m:
-            final_answer = m.group(1).strip()
+        # m = re.search(r"FINAL ANSWER:(.*?)\n", console_log, re.DOTALL)
+        # if m:
+        #     final_answer = m.group(1).strip()
+
+        matches = re.findall(r"FINAL ANSWER:(.*?)\n", console_log, re.DOTALL)
+        if matches:
+            final_answer = matches[-1].strip()  
+
 
         # Missing the final answer line
         if final_answer is None:

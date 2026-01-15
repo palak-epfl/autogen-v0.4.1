@@ -171,9 +171,9 @@ def default_tabulate(
             instance_dir = os.path.join(task_path, str(instance))
             results[f"Trial {instance} Success"] = scorer(instance_dir)
             results[f"Trial {instance} Time"] = timer(instance_dir)
-            # print("PALAK: instance: ", instance)
-            # print("PALAK: instance_dir: ", instance_dir)
-            # print("PALAK: scorer(instance_dir): ", scorer(instance_dir))
+            print("PALAK: instance: ", instance)
+            print("PALAK: instance_dir: ", instance_dir)
+            print("PALAK: scorer(instance_dir): ", scorer(instance_dir))
             with open(f"{instance_dir}/result.txt", "w") as f:
                 f.write(f"{scorer(instance_dir)}")
                 print("result is: ", scorer(instance_dir))
