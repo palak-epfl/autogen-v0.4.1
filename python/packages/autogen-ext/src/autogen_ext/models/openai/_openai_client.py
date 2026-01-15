@@ -109,7 +109,8 @@ except PackageNotFoundError:
 AZURE_OPENAI_USER_AGENT = f"autogen-python/{version_info}"
 
 ###### PALAK
-from .priority_tracker import priority_tracker, extract_tool_calls_from_response
+# from .priority_tracker import priority_tracker, extract_tool_calls_from_response
+from .priority_tracker_non_ml import priority_tracker, extract_tool_calls_from_response
 
 
 # ###### PALAK
