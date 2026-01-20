@@ -760,39 +760,33 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         if task_id_from_request_id not in self.PALAK_TASK_STEP_COUNT:
             self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] = 0
         self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] += 1
+
         task_priority_step = 0
-        ##### og
-        # if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 10:
-        #     task_priority_step = 2
-        #     if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 15:
-        #         task_priority_step = 4
-        #         if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 30:
-        #             task_priority_step = 6
-        #             if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 45:
-        #                 task_priority_step = 8
-
-        ##### extreme
         if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 10:
-            task_priority_step = self.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
+            task_priority_step = 2
+            if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 15:
+                task_priority_step = 4
+                if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 30:
+                    task_priority_step = 6
+                    if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 45:
+                        task_priority_step = 8
 
-        # #### toolcall priority
-        # from datetime import datetime, timezone
-        # ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
-        # # ============================================================
-        # # PALAK: SECTION 1 - Get Dynamic Priority
-        # # ============================================================
-        # task_id = custom_request_id if custom_request_id else "default_task"
-        # task_id = (task_id.split(":")[0]).split("_")[-1]
-        # print("palak_task_id: ", task_id)
-        # task_priority_toolcall = priority_tracker.get_priority(task_id)
-        # # Optional: Log current state
-        # stats = priority_tracker.get_stats(task_id)
-        # print(f"PALAK: [{ts}] Task {task_id} - Priority: {task_priority}, Stats: {stats}")
-        # # ============================================================
+        #### PALAK: Original timestamp code
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        # ============================================================
+        # PALAK: SECTION 1 - Get Dynamic Priority
+        # ============================================================
+        task_id = custom_request_id if custom_request_id else "default_task"
+        task_id = (task_id.split(":")[0]).split("_")[-1]
+        print("palak_task_id: ", task_id)
+        task_priority_toolcall = priority_tracker.get_priority(task_id)
+        # Optional: Log current state
+        stats = priority_tracker.get_stats(task_id)
+        print(f"PALAK: [{ts}] Task {task_id} - Priority: {task_priority}, Stats: {stats}")
+        # ============================================================
 
-        ##### task priority: combination of step and toolcall 
-        # task_priority = min(task_priority_step, task_priority_toolcall)
-        task_priority = task_priority_step
+        task_priority = min(task_priority_step, task_priority_toolcall)
 
         #### PALAK: single step priority
         #### task_priority = 0 if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] <= 30 else 5
