@@ -771,9 +771,20 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         #             if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 45:
         #                 task_priority_step = 8
 
-        ##### extreme
+        ##### extreme: 1
         if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 10:
             task_priority_step = self.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
+
+        # ##### extreme: 2
+        # task_priority_step = self.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
+
+        # ##### extreme: 3
+        # if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 5:
+        #     task_priority_step = 1
+        # if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 10:
+        #     task_priority_step = 2
+        # if self.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 15:
+        #     task_priority_step = self.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
 
         # #### toolcall priority
         # from datetime import datetime, timezone
