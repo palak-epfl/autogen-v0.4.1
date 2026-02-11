@@ -478,6 +478,7 @@ class CreateParams:
 class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     # ##### PALAK
     PALAK_TASK_STEP_COUNT = {}
+    PALAK_TASK_ORCHESTRATOR_SIGNALS = {}
 
     def __init__(
         self,
@@ -729,7 +730,6 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             tool_choice,
             json_output,
             extra_create_args,
-            # extra_create_args={**extra_create_args, 'priority': 5},
         )
         future: Union[Task[ParsedChatCompletion[BaseModel]], Task[ChatCompletion]]
 
@@ -737,112 +737,106 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
-        # ###### multi-step priority scheme
         task_priority = 0
-        task_priority_step = 0
-        task_priority_toolcall = 0
+        # task_priority_step = 0
         task_id_from_request_id = custom_request_id.split('_')[-1]
         print("BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT: ", BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT)
-
         if task_id_from_request_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT:
             BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] = 0
         BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] += 1
-        task_priority_step = 0
 
 
-        ###### OG
-        import numpy as np
-        agent_phase_priority = {
-            "file_surfer": 0, 
-            "orchestrator_create_plan": 0, 
-            "orchestrator_gather_facts": 0, 
-            "orchestrator_prepare_final_ans": 0, 
-            "web_surfer_summarize_agent": 0, 
-            "web_surfer_generate_agent": 1, 
-            "coder": 1, 
-            "orchestrator_update_plan": 2, 
-            "orchestrator_update_fact": 2, 
-            "progress_ledger": 2
-        }
-
-        # Find which phase
-        which_phase = "file_surfer"
-        for key in agent_phase_priority.keys():
-            if key in custom_request_id:
-                which_phase = key
-                break
-
+        # ###### orbit 14
+        # import numpy as np
+        # agent_phase_priority = {
+        #     "file_surfer": 0, 
+        #     "orchestrator_create_plan": 0, 
+        #     "orchestrator_gather_facts": 0, 
+        #     "orchestrator_prepare_final_ans": 0, 
+        #     "web_surfer_summarize_agent": 0, 
+        #     "web_surfer_generate_agent": 1, 
+        #     "coder": 1, 
+        #     "orchestrator_update_plan": 2, 
+        #     "orchestrator_update_fact": 2, 
+        #     "progress_ledger": 2
+        # }
         step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
-        phase_penalty = agent_phase_priority[which_phase]
+        # phase_penalty = agent_phase_priority[which_phase]
 
-        # 3-Level Priority System
-        if step_count < 5:
-            # LEVEL 1: Very High Priority (just started)
-            # Priority range: 0-2
-            task_priority = phase_penalty
+        # task_priority = step_count + phase_penalty
+        # task_priority = step_count
+
+        ####### orbit 14
+        # if step_count > 5 and task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+        #     task_priority = step_count
+        #     signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+        #     early_signals = signals[:min(5, len(signals))] ##### orbit 14
+        #     early_no_progress = sum(1 for _, is_progress in early_signals if not is_progress)
+        #     early_loop = sum(1 for is_loop, _ in early_signals if is_loop)
+        #     print("initial task priority: ", task_priority)
+        #     print("early_loop: ", early_loop)
+        #     print("early_no_progress: ", early_no_progress)
+        #     # if early_no_progress == 0 and early_loop == 0:
+        #     #     task_priority = int(task_priority * 0.5)
+        #     # elif early_no_progress >= 2 or early_loop >= 2:
+        #     #     task_priority = int(task_priority * 2.0)
+
+        #     if early_no_progress == 0 and early_loop == 0:
+        #         task_priority = 5
+        #     elif early_no_progress >= 2 or early_loop >= 2:
+        #         task_priority = 50
+        #     print("new task priority: ", task_priority)
+
+        # ###### orbit 15
+        # if step_count > 5 and task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+        #     signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+        #     loop_count = sum(1 for is_loop, _ in signals if is_loop)
+        #     progress_count = sum(1 for _, is_progress in signals if is_progress)
+        #     task_priority = 1 + loop_count + progress_count
+        #     print(f"Task {task_id_from_request_id}: step={step_count}, "
+        #         f"priority={task_priority}, "
+        #         f"loop={loop_count}, progress={progress_count}, "
+        #         f"ratio={task_priority/step_count:.2f}")
             
-        elif step_count < 10:
-            # LEVEL 2: High Priority (making progress, not drifted yet)
-            # Priority range: 10-12
-            task_priority = 10 + phase_penalty
-            
-        elif step_count < 20:
-            # LEVEL 2: High Priority (making progress, not drifted yet)
-            # Priority range: 10-12
-            task_priority = 20 + phase_penalty
-
-        else:
-            # LEVEL 3: Deprioritized (likely drifting)
-            # Priority range: 100+
-            steps_over = step_count - 10
-            base_penalty = 100
-            step_contribution = int(10 * np.log1p(steps_over))
-            task_priority = base_penalty + step_contribution + phase_penalty
-
-        print(f"Task {task_id_from_request_id}: step={step_count}, phase={which_phase}, priority={task_priority}")
         
+        ###### orbit 17
+        if step_count > 5 and task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+            signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+            loop_count = sum(1 for is_loop, _ in signals if is_loop)
+            progress_count = sum(1 for _, is_progress in signals if is_progress)
 
-        
+            early_signals = signals[:min(5, len(signals))] 
+            early_no_progress = sum(1 for _, is_progress in early_signals if not is_progress)
+            early_loop = sum(1 for is_loop, _ in early_signals if is_loop)
+            print("initial task priority: ", task_priority)
+            print("early_loop: ", early_loop)
+            print("early_no_progress: ", early_no_progress)
 
+            sum_count = loop_count + progress_count
+            task_priority = sum_count
 
-        # ##### extreme: 0
-        # if BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 5:
-        #     task_priority_step = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
-        # else:
-        #     task_priority_step = 0
-        # print("task_priority_step: ", task_priority_step)
+            # ###### orbit 16
+            # if early_no_progress == 0 and early_loop == 0:
+            #     task_priority = 1
+            # elif (early_no_progress >= 2 or early_loop >= 2) and sum_count >= 7:
+            #     task_priority = 50
+            # elif (early_no_progress == 0 or early_loop == 0) and sum_count < 7:
+            #     task_priority = 2
 
-        # ##### extreme: 10
-        # agent_phase_priority = {"file_surfer": 0, "orchestrator_create_plan": 0, "orchestrator_gather_facts": 0, "orchestrator_prepare_final_ans": 0, "web_surfer_summarize_agent": 0, "web_surfer_generate_agent": 1, "coder": 1, "orchestrator_update_plan": 2, "orchestrator_update_fact": 2, "progress_ledger": 2}
-        # which_phase = "file_surfer"
-        # for key in agent_phase_priority.keys():
-        #     if key in custom_request_id:
-        #         which_phase = key
-        #         break
-        # print("which_phase: ", which_phase)
-        # if BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 5:
-        #     task_priority_step = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] - 5
-        #     task_priority_step = 3 * task_priority_step + agent_phase_priority[which_phase]
-        # else:
-        #     task_priority_step = 3 * task_priority_step + agent_phase_priority[which_phase]
+            if early_no_progress == 0 and early_loop == 0 and sum_count < 5 :
+                task_priority = 0
+            elif (early_no_progress >= 2 or early_loop >= 2) and sum_count > 6:
+                task_priority = 50
+            elif (early_no_progress == 0 or early_loop == 0) and sum_count < 7:
+                task_priority = 1
+            print(f"Task {task_id_from_request_id}: step={step_count}, "
+                f"priority={task_priority}, "
+                f"loop={loop_count}, progress={progress_count}, "
+                f"ratio={task_priority/step_count:.2f}")
 
-        
-        # ##### extreme: 9
-        # agent_phase_priority = {"file_surfer": 0, "orchestrator_create_plan": 0, "orchestrator_gather_facts": 0, "orchestrator_prepare_final_ans": 0, "web_surfer_summarize_agent": 0, "web_surfer_generate_agent": 1, "coder": 1, "orchestrator_update_plan": 2, "orchestrator_update_fact": 2, "progress_ledger": 2}
-        # which_phase = "file_surfer"
-        # for key in agent_phase_priority.keys():
-        #     if key in custom_request_id:
-        #         which_phase = key
-        #         break
-        # print("which_phase: ", which_phase)
-        # if BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] > 10:
-        #     task_priority_step = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] - 10
-        #     task_priority_step = 3 * task_priority_step + agent_phase_priority[which_phase]
-        # else:
-        #     task_priority_step = 3 * task_priority_step + agent_phase_priority[which_phase]
+        print(f"Task {task_id_from_request_id}: step={step_count}, priority={task_priority}")
 
-
-        task_priority = task_priority_step
+        # task_priority = task_priority_step
         print("task_priority: ", task_priority)       
 
         if create_params.response_format is not None:
@@ -902,6 +896,27 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             )
 
         event_logger.info(temp_LLMCallEvent)
+
+        try:    
+            print("PALAK: result.model_dump()['choices']['message']['parsed']: ", result.model_dump()["choices"][0]["message"]["parsed"])
+        except:
+            pass
+
+        try:
+            parsed = result.model_dump()["choices"][0]["message"]["parsed"]
+            if parsed and "is_in_loop" in parsed and "is_progress_being_made" in parsed:
+                is_loop = parsed["is_in_loop"]["answer"]
+                is_progress = parsed["is_progress_being_made"]["answer"]
+                
+                # Initialize if needed
+                if task_id_from_request_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+                    BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id] = []
+                
+                # Record the signal
+                BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id].append((is_loop, is_progress))
+        except:
+            pass  # If parsing fails, just skip signal recording
+        
 
         # logger.info(
         #     LLMCallEvent(
@@ -1002,6 +1017,318 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
 
         # TODO - why is this cast needed?
         return response
+
+
+
+    # #### PALAK
+    # async def create(
+    #     self,
+    #     messages: Sequence[LLMMessage],
+    #     *,
+    #     tools: Sequence[Tool | ToolSchema] = [],
+    #     tool_choice: Tool | Literal["auto", "required", "none"] = "auto",
+    #     json_output: Optional[bool | type[BaseModel]] = None,
+    #     extra_create_args: Mapping[str, Any] = {},
+    #     cancellation_token: Optional[CancellationToken] = None,
+    #     custom_request_id: str = None,
+    # ) -> CreateResult:
+    #     create_params = self._process_create_args(
+    #         messages,
+    #         tools,
+    #         tool_choice,
+    #         json_output,
+    #         extra_create_args,
+    #         # extra_create_args={**extra_create_args, 'priority': 5},
+    #     )
+    #     future: Union[Task[ParsedChatCompletion[BaseModel]], Task[ChatCompletion]]
+
+    #     #### PALAK: 
+    #     from datetime import datetime, timezone
+    #     ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+    #     # ###### multi-step priority scheme
+    #     task_priority = 0
+    #     task_priority_step = 0
+    #     task_priority_toolcall = 0
+    #     task_id_from_request_id = custom_request_id.split('_')[-1]
+    #     print("BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT: ", BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT)
+
+    #     if task_id_from_request_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT:
+    #         BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] = 0
+    #     BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] += 1
+    #     task_priority_step = 0
+
+
+    #     # ###### OG
+    #     # import numpy as np
+    #     # agent_phase_priority = {
+    #     #     "file_surfer": 0, 
+    #     #     "orchestrator_create_plan": 0, 
+    #     #     "orchestrator_gather_facts": 0, 
+    #     #     "orchestrator_prepare_final_ans": 0, 
+    #     #     "web_surfer_summarize_agent": 0, 
+    #     #     "web_surfer_generate_agent": 1, 
+    #     #     "coder": 1, 
+    #     #     "orchestrator_update_plan": 2, 
+    #     #     "orchestrator_update_fact": 2, 
+    #     #     "progress_ledger": 2
+    #     # }
+
+    #     # # Find which phase
+    #     # which_phase = "file_surfer"
+    #     # for key in agent_phase_priority.keys():
+    #     #     if key in custom_request_id:
+    #     #         which_phase = key
+    #     #         break
+
+    #     # step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
+    #     # phase_penalty = agent_phase_priority[which_phase]
+
+    #     # # 3-Level Priority System
+    #     # if step_count < 5:
+    #     #     # LEVEL 1: Very High Priority (just started)
+    #     #     # Priority range: 0-2
+    #     #     task_priority = phase_penalty
+            
+    #     # elif step_count < 10:
+    #     #     # LEVEL 2: High Priority (making progress, not drifted yet)
+    #     #     # Priority range: 10-12
+    #     #     task_priority = 10 + phase_penalty
+            
+    #     # elif step_count < 20:
+    #     #     # LEVEL 2: High Priority (making progress, not drifted yet)
+    #     #     # Priority range: 10-12
+    #     #     task_priority = 20 + phase_penalty
+
+    #     # else:
+    #     #     # LEVEL 3: Deprioritized (likely drifting)
+    #     #     # Priority range: 100+
+    #     #     steps_over = step_count - 10
+    #     #     base_penalty = 100
+    #     #     step_contribution = int(10 * np.log1p(steps_over))
+    #     #     task_priority = base_penalty + step_contribution + phase_penalty
+
+    #     # print(f"Task {task_id_from_request_id}: step={step_count}, phase={which_phase}, priority={task_priority}")
+        
+
+    #     # ============================================================
+    #     # CHANGE 3: Add signal multiplier to priority calculation
+    #     # ============================================================
+    #     import numpy as np
+    #     agent_phase_priority = {
+    #         "file_surfer": 0, 
+    #         "orchestrator_create_plan": 0, 
+    #         "orchestrator_gather_facts": 0, 
+    #         "orchestrator_prepare_final_ans": 0, 
+    #         "web_surfer_summarize_agent": 0, 
+    #         "web_surfer_generate_agent": 1, 
+    #         "coder": 1, 
+    #         "orchestrator_update_plan": 2, 
+    #         "orchestrator_update_fact": 2, 
+    #         "progress_ledger": 2
+    #     }
+    #     step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
+    #     phase_penalty = agent_phase_priority[which_phase]
+
+    #     task_priority = step_count + phase_penalty
+
+    #     # Signal multiplier (after step 5)
+    #     if step_count >= 5 and task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+    #         signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+    #         early_signals = signals[:min(5, len(signals))]
+    #         early_no_progress = sum(1 for _, is_progress in early_signals if not is_progress)
+    #         early_loop = sum(1 for is_loop, _ in early_signals if is_loop)
+            
+    #         if early_no_progress == 0 and early_loop == 0:
+    #             task_priority = int(task_priority * 0.5)
+    #         elif early_no_progress >= 2 or early_loop >= 2:
+    #             task_priority = int(task_priority * 2.0)
+    #     print(f"Task {task_id_from_request_id}: step={step_count}, phase={which_phase}, priority={task_priority}")
+
+
+
+    #     task_priority = task_priority_step
+    #     print("task_priority: ", task_priority)       
+
+    #     if create_params.response_format is not None:
+    #         print(f"PALAK: IMPORTANT: [{ts}] SENT THIS REQUEST: {custom_request_id}")
+    #         future = asyncio.ensure_future(
+    #             self._client.beta.chat.completions.parse(
+    #                 messages=create_params.messages,
+    #                 tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
+    #                 response_format=create_params.response_format,
+    #                 **create_params.create_args,
+    #                 extra_headers={
+    #                     "x-request-id": f"{custom_request_id}",
+    #                 },
+    #                 extra_body={
+    #                     "priority": task_priority
+    #                 }
+    #             )
+    #         )
+    #     else:
+    #         print(f"PALAK: IMPORTANT: [{ts}] SENT THIS REQUEST: {custom_request_id}")
+    #         future = asyncio.ensure_future(
+    #             self._client.chat.completions.create(
+    #                 messages=create_params.messages,
+    #                 stream=False,
+    #                 tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
+    #                 **create_params.create_args,
+    #                 extra_headers={
+    #                     "x-request-id": f"{custom_request_id}",
+    #                 },
+    #                 extra_body={
+    #                     "priority": task_priority
+    #                 }
+    #             )
+    #         )
+
+    #     if cancellation_token is not None:
+    #         cancellation_token.link_future(future)
+    #     result: Union[ParsedChatCompletion[BaseModel], ChatCompletion] = await future
+    #     if create_params.response_format is not None:
+    #         result = cast(ParsedChatCompletion[Any], result)
+
+    #     # Handle the case where OpenAI API might return None for token counts
+    #     # even when result.usage is not None
+
+    #     usage = RequestUsage(
+    #         # TODO backup token counting
+    #         prompt_tokens=getattr(result.usage, "prompt_tokens", 0) if result.usage is not None else 0,
+    #         completion_tokens=getattr(result.usage, "completion_tokens", 0) if result.usage is not None else 0,
+    #     )
+
+    #     temp_LLMCallEvent = LLMCallEvent(
+    #             messages=cast(List[Dict[str, Any]], create_params.messages),
+    #             response=result.model_dump(),
+    #             prompt_tokens=usage.prompt_tokens,
+    #             completion_tokens=usage.completion_tokens,
+    #             tools=create_params.tools,
+    #         )
+
+    #     event_logger.info(temp_LLMCallEvent)
+
+    #     try:    
+    #         print("PALAK: result.model_dump()['choices']['message']['parsed']: ", result.model_dump()["choices"][0]["message"]["parsed"])
+    #     except:
+    #         pass
+
+    #     # ADD THIS RIGHT AFTER:
+    #     try:
+    #         parsed = result.model_dump()["choices"][0]["message"]["parsed"]
+    #         if parsed and "is_in_loop" in parsed and "is_progress_being_made" in parsed:
+    #             is_loop = parsed["is_in_loop"]["answer"]
+    #             is_progress = parsed["is_progress_being_made"]["answer"]
+                
+    #             # Initialize if needed
+    #             if task_id_from_request_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+    #                 BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id] = []
+                
+    #             # Record the signal
+    #             BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id].append((is_loop, is_progress))
+    #     except:
+    #         pass  # If parsing fails, just skip signal recording
+        
+
+    #     # logger.info(
+    #     #     LLMCallEvent(
+    #     #         messages=cast(List[Dict[str, Any]], create_params.messages),
+    #     #         response=result.model_dump(),
+    #     #         prompt_tokens=usage.prompt_tokens,
+    #     #         completion_tokens=usage.completion_tokens,
+    #     #         tools=create_params.tools,
+    #     #     )
+    #     # )
+
+    #     if self._resolved_model is not None:
+    #         if self._resolved_model != result.model:
+    #             warnings.warn(
+    #                 f"Resolved model mismatch: {self._resolved_model} != {result.model}. "
+    #                 "Model mapping in autogen_ext.models.openai may be incorrect. "
+    #                 f"Set the model to {result.model} to enhance token/cost estimation and suppress this warning.",
+    #                 stacklevel=2,
+    #             )
+
+    #     # Limited to a single choice currently.
+    #     choice: Union[ParsedChoice[Any], ParsedChoice[BaseModel], Choice] = result.choices[0]
+
+    #     # Detect whether it is a function call or not.
+    #     # We don't rely on choice.finish_reason as it is not always accurate, depending on the API used.
+    #     content: Union[str, List[FunctionCall]]
+    #     thought: str | None = None
+    #     if choice.message.function_call is not None:
+    #         raise ValueError("function_call is deprecated and is not supported by this model client.")
+    #     elif choice.message.tool_calls is not None and len(choice.message.tool_calls) > 0:
+    #         if choice.finish_reason != "tool_calls":
+    #             warnings.warn(
+    #                 f"Finish reason mismatch: {choice.finish_reason} != tool_calls "
+    #                 "when tool_calls are present. Finish reason may not be accurate. "
+    #                 "This may be due to the API used that is not returning the correct finish reason.",
+    #                 stacklevel=2,
+    #             )
+    #         if choice.message.content is not None and choice.message.content != "":
+    #             # Put the content in the thought field.
+    #             thought = choice.message.content
+    #         # NOTE: If OAI response type changes, this will need to be updated
+    #         content = []
+    #         for tool_call in choice.message.tool_calls:
+    #             if not isinstance(tool_call.function.arguments, str):
+    #                 warnings.warn(
+    #                     f"Tool call function arguments field is not a string: {tool_call.function.arguments}."
+    #                     "This is unexpected and may due to the API used not returning the correct type. "
+    #                     "Attempting to convert it to string.",
+    #                     stacklevel=2,
+    #                 )
+    #                 if isinstance(tool_call.function.arguments, dict):
+    #                     tool_call.function.arguments = json.dumps(tool_call.function.arguments)
+    #             content.append(
+    #                 FunctionCall(
+    #                     id=tool_call.id,
+    #                     arguments=tool_call.function.arguments,
+    #                     name=normalize_name(tool_call.function.name),
+    #                 )
+    #             )
+    #         finish_reason = "tool_calls"
+    #     else:
+    #         # if not tool_calls, then it is a text response and we populate the content and thought fields.
+    #         finish_reason = choice.finish_reason
+    #         content = choice.message.content or ""
+    #         # if there is a reasoning_content field, then we populate the thought field. This is for models such as R1 - direct from deepseek api.
+    #         if choice.message.model_extra is not None:
+    #             reasoning_content = choice.message.model_extra.get("reasoning_content")
+    #             if reasoning_content is not None:
+    #                 thought = reasoning_content
+
+    #     logprobs: Optional[List[ChatCompletionTokenLogprob]] = None
+    #     if choice.logprobs and choice.logprobs.content:
+    #         logprobs = [
+    #             ChatCompletionTokenLogprob(
+    #                 token=x.token,
+    #                 logprob=x.logprob,
+    #                 top_logprobs=[TopLogprob(logprob=y.logprob, bytes=y.bytes) for y in x.top_logprobs],
+    #                 bytes=x.bytes,
+    #             )
+    #             for x in choice.logprobs.content
+    #         ]
+
+    #     #   This is for local R1 models.
+    #     if isinstance(content, str) and self._model_info["family"] == ModelFamily.R1 and thought is None:
+    #         thought, content = parse_r1_content(content)
+
+    #     response = CreateResult(
+    #         finish_reason=normalize_stop_reason(finish_reason),
+    #         content=content,
+    #         usage=usage,
+    #         cached=False,
+    #         logprobs=logprobs,
+    #         thought=thought,
+    #     )
+
+    #     self._total_usage = _add_usage(self._total_usage, usage)
+    #     self._actual_usage = _add_usage(self._actual_usage, usage)
+
+    #     # TODO - why is this cast needed?
+    #     return response
 
     async def create_stream(
         self,

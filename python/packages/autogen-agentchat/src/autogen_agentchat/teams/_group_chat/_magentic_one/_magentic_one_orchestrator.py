@@ -355,7 +355,15 @@ class MagenticOneOrchestrator(BaseGroupChatManager):
                         "answer": self._participant_names[0],
                     }
 
-                # Validate the structure
+                ## Validate the structure
+                # required_keys = [
+                #     "is_request_satisfied",
+                #     "is_progress_being_made",
+                #     "will_task_take_long", #### PALAK
+                #     "is_in_loop",
+                #     "instruction_or_question",
+                #     "next_speaker",
+                # ]
                 required_keys = [
                     "is_request_satisfied",
                     "is_progress_being_made",
