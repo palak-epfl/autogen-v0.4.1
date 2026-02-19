@@ -108,9 +108,385 @@ except PackageNotFoundError:
     version_info = "dev"
 AZURE_OPENAI_USER_AGENT = f"autogen-python/{version_info}"
 
-# ###### PALAK
-# from .priority_tracker_non_ml import priority_tracker, extract_tool_calls_from_response
+# ###### PALAK (for online external assement progress)
 
+import json
+import re
+import asyncio
+import logging
+from typing import Optional
+
+judge_file_handler = logging.FileHandler("judge_log.jsonl", mode="a")
+judge_file_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+
+_judge_logger = logging.getLogger("online_judge")
+_judge_logger.setLevel(logging.DEBUG)
+_judge_logger.addHandler(judge_file_handler)
+
+
+TOTAL_ROUND = 25
+
+##### with answer candidate detection
+_JUDGE_SYSTEM_PROMPT = f"""You are an expert at analyzing AI agent tool call trajectories.
+
+The agent you are analyzing is part of MagenticOne, a multi-agent system built on top of an LLM orchestrator.
+MagenticOne consists of the following specialized agents that the orchestrator can delegate to:
+
+- Orchestrator: The lead agent that plans, delegates tasks to other agents, and synthesizes results.
+- WebSurfer: Browses the web, searches for information, and navigates web pages.
+- FileSurfer: Reads and navigates local files (PDFs, text files, spreadsheets, etc.).
+- Coder: Writes and reasons about code to solve problems programmatically.
+- ComputerTerminal: Executes code and shell commands in a sandboxed environment.
+
+Important: Even if early steps show WebSurfer or FileSurfer struggling, the orchestrator can \
+fall back to Coder + ComputerTerminal to solve tasks programmatically. Do not penalize the agent \
+prematurely for early failures if there are still unexplored avenues available.
+
+The system has a maximum of {TOTAL_ROUND} rounds. The trajectory includes [Round X/{TOTAL_ROUND}] markers showing \
+the orchestrator's self-assessment at each round boundary. Pay close attention to rounds remaining.
+
+You will be given:
+1. The original task/prompt.
+2. The trajectory so far: tool calls with agent reasoning, round boundary assessments,
+   and ComputerTerminal synthetic steps (purpose only, code hidden).
+3. How many steps and rounds have elapsed.
+4. Whether a candidate answer was already detected in a previous judge call.
+
+Key pattern — answer candidate detection:
+Set answer_candidate_detected=true if ANYWHERE in the trajectory the agent's reasoning or a tool \
+output mentions any specific value that could be the answer — a number, a name, a date, a hex \
+code, a count, etc. — even in passing, even without confidence. Low bar: "BERT-base has 12 layers", \
+"the file mentions 42", "color appears to be #FF0000" all qualify.
+
+How to weigh answer_candidate_detected against rounds remaining:
+- answer_candidate_detected=true + many rounds remaining: strong signal of success.
+- answer_candidate_detected=true + a few rounds remaining: still a strong signal of success.
+- answer_candidate_detected=true + very few rounds + agent stuck in loop: weaker signal.
+- answer_candidate_detected=false: strong signal of failure, especially with few rounds left.
+
+IMPORTANT — answer_candidate_detected is monotonic: if you are told a candidate was already \
+detected in a previous call, you MUST set answer_candidate_detected=true regardless of whether \
+recent steps re-state it.
+
+Respond with EXACTLY one JSON object (no markdown, no explanation):
+{{
+  "prediction": "Correct" | "Incorrect",
+  "confidence": <0.0-1.0>,
+  "reasoning": "<one line reason>",
+  "answer_candidate_detected": <true|false>
+}}
+
+If predicting Incorrect because the agent will hit the round limit, include "max_round_reached" \
+in reasoning.
+"""
+
+# ---------------------------------------------------------------------------
+# Task prompt extraction
+# ---------------------------------------------------------------------------
+
+def _extract_task_prompt(messages: list) -> Optional[str]:
+    """Extract the original task from the first orchestrator gather_facts message.
+    Looks for the filled-in ORCHESTRATOR_TASK_LEDGER_FACTS_PROMPT template."""
+    for msg in messages:
+        content = msg.get("content", "")
+        if not isinstance(content, str):
+            continue
+        if "Here is the request:" in content and "Here is the pre-survey:" in content:
+            try:
+                start = content.index("Here is the request:") + len("Here is the request:")
+                end = content.index("Here is the pre-survey:")
+                return content[start:end].strip()
+            except ValueError:
+                continue
+    return None
+
+
+def _format_trajectory_for_judge(trajectory: list) -> str:
+    """Format accumulated trajectory steps into a prompt string for the judge.
+    Only the last step's tool output is included (same as offline script)."""
+    if not trajectory:
+        return "(no steps yet)"
+
+    # _judge_logger.debug("raw trajectory: ", trajectory)
+
+    lines = []
+    last_tool_idx = None
+    for i in range(len(trajectory) - 1, -1, -1):
+        if trajectory[i].get("step_type") == "tool_call":
+            last_tool_idx = i
+            break
+
+    for i, step in enumerate(trajectory):
+        stype = step.get("step_type")
+        # print("stype: ", stype)
+
+        if stype == "progress_ledger":
+            round_num = step.get("round_num", "?")
+            assessment = step.get("assessment", {})
+            lines.append(
+                f"[Round {round_num}/{TOTAL_ROUND}] Orchestrator assessment:\n"
+                f"  Task satisfied: {assessment.get('is_request_satisfied', '?')} "
+                f"— {assessment.get('is_request_satisfied_reason', '')}\n"
+                f"  In loop: {assessment.get('is_in_loop', '?')}\n"
+                f"  Progress being made: {assessment.get('is_progress_being_made', '?')} "
+                f"— {assessment.get('is_progress_being_made_reason', '')}"
+            )
+
+            # next_speaker may be a plain string or {"answer": "ComputerTerminal", ...}
+            next_speaker_raw = assessment.get("next_speaker", "")
+            if isinstance(next_speaker_raw, dict):
+                next_speaker_raw = next_speaker_raw.get("answer", "")
+            next_speaker_str = str(next_speaker_raw).strip().lower()
+            # print("next_speaker_str: ", next_speaker_str)
+
+            reason_raw = assessment.get("instruction_or_question_reason", "")
+            if isinstance(reason_raw, dict):
+                reason_raw = reason_raw.get("answer", reason_raw.get("reason", ""))
+            reason = str(reason_raw)
+
+            if next_speaker_str == "computerterminal":
+                if len(reason) > 400:
+                    reason = reason[:400] + "..."
+                lines.append(
+                    f"Step {step.get('step_num', '?')} [Synthetic]: ComputerTerminal invoked\n"
+                    f"  Purpose: {reason}"
+                )
+
+        elif stype == "coder_reasoning":
+            rc = step.get("reasoning_content", "")
+            ct = step.get("content", "")
+            lines.append(
+                f"Step {step.get('step_num', '?')}: coder_agent "
+                f"(reasoning_content: {rc[:400] if rc else ''}, content: {ct[:200] if ct else ''})"
+            )
+
+        elif stype == "tool_call":
+            is_last = (i == last_tool_idx)
+            tool_name = step.get("tool_name", "unknown")
+            args_str = step.get("args_str", "{}")
+
+            line = f"Step {step.get('step_num', '?')}: {tool_name}({args_str})"
+            reasoning = step.get("reasoning", "")
+            if reasoning:
+                line += f"\n  Reasoning: {reasoning[:400]}"
+            if is_last and step.get("tool_output"):
+                output = step["tool_output"]
+                if len(output) > 800:
+                    output = output[:800] + "..."
+                line += f"\n  Output:\n    {output}"
+            lines.append(line)
+
+    return "\n\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# LLM response parsing (mirrors predict_tool_calls.py)
+# ---------------------------------------------------------------------------
+
+def _extract_json_from_text_judge(text: str):
+    """Try multiple strategies to extract a JSON prediction object."""
+    if not text:
+        return None, None
+    text = text.strip()
+
+    # Strategy 1: ```json ... ``` code block
+    if "```" in text:
+        for block in text.split("```"):
+            block = block.strip()
+            if block.startswith("json"):
+                block = block[4:].strip()
+            if block.startswith("{"):
+                try:
+                    return json.loads(block), "json_codeblock"
+                except json.JSONDecodeError:
+                    pass
+
+    # Strategy 2: starts directly with {
+    if text.startswith("{"):
+        try:
+            return json.loads(text), "direct_json"
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 3: last { to end (handles Qwen3 prose-before-JSON pattern)
+    last_brace = text.rfind("{")
+    if last_brace != -1:
+        try:
+            return json.loads(text[last_brace:]), "last_brace_json"
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 4: regex for any {...} containing "prediction"
+    for m in re.finditer(r'\{[^{}]*"prediction"[^{}]*\}', text):
+        try:
+            return json.loads(m.group()), "regex_json"
+        except json.JSONDecodeError:
+            continue
+
+    return None, None
+
+
+def _parse_judge_response(content: str, reasoning_content: str):
+    """Parse judge LLM response into structured prediction dict."""
+    for label, text in [("content", content), ("reasoning", reasoning_content)]:
+        if not text:
+            continue
+        parsed, strategy = _extract_json_from_text_judge(text)
+        print("parsed judge response:" )
+        print("parsed: ", parsed)
+        print("strategy: ", strategy)
+        if parsed and "prediction" in parsed:
+            return parsed, f"{strategy}_in_{label}"
+
+    # Heuristic fallback
+    for label, text in [("reasoning", reasoning_content), ("content", content)]:
+        if not text:
+            continue
+        cl = text.lower()
+        if "prediction" in cl and ("correct" in cl or "incorrect" in cl):
+            after_pred = cl.split("prediction")[-1][:80]
+            pred = "Correct" if ("correct" in after_pred and "incorrect" not in after_pred) else "Incorrect"
+            cm = re.search(r'confidence["\s:]+(\d+\.?\d*)', cl)
+            conf = float(cm.group(1)) if cm else 0.5
+            if conf > 1.0:
+                conf /= 100.0
+            return {
+                "prediction": pred,
+                "confidence": min(conf, 1.0),
+                "reasoning": f"(heuristic) {text[-200:]}",
+                "answer_candidate_detected": None,
+            }, f"heuristic_from_{label}"
+
+    return None, "failed"
+
+
+# ---------------------------------------------------------------------------
+# Fire-and-forget judge call
+# ---------------------------------------------------------------------------
+
+async def _fire_judge(task_id: str, client, model: str, task_state: dict) -> None:
+    """
+    Async fire-and-forget judge call.
+    Updates PALAK_JUDGE_PREDICTION and PALAK_JUDGE_ACD on the class via task_state dict.
+    task_state is a mutable dict of references into the class variables for this task_id.
+    """
+    try:
+        trajectory = task_state["trajectory"]
+        task_prompt = task_state["task_prompt"]
+        prior_acd = task_state["prior_acd"]
+        step_count = task_state["step_count"]
+        rounds_so_far = task_state["rounds_so_far"]
+        rounds_remaining = TOTAL_ROUND - rounds_so_far
+        # rounds_remaining = 20 - rounds_so_far
+
+        # Build prompt section
+        prompt_section = ""
+        if task_prompt:
+            truncated = task_prompt[:5000] + ("..." if len(task_prompt) > 5000 else "")
+            prompt_section = f'Original task/prompt:\n"""{truncated}"""\n\n'
+            print("prompt section: ", prompt_section)
+
+        acd_note = (
+            "IMPORTANT: A specific candidate answer value was already detected in an earlier "
+            "judge call for this trajectory. You MUST set answer_candidate_detected=true."
+            if prior_acd else
+            "No candidate answer has been detected in earlier judge calls yet."
+        )
+
+
+        # print("trajectory: ", trajectory)
+        trajectory_text = _format_trajectory_for_judge(trajectory)
+        # print("trajectory_text: ", trajectory_text)
+
+        user_msg = (
+            f"{prompt_section}"
+            f"Trajectory context: {step_count} steps so far | "
+            f"{rounds_so_far}/{TOTAL_ROUND} rounds elapsed | "
+            f"~{rounds_remaining} rounds remaining.\n"
+            f"{acd_note}\n\n"
+            f"Trajectory:\n{trajectory_text}\n\n"
+            f"Respond with EXACTLY one JSON object with fields: "
+            f"prediction, confidence, reasoning, answer_candidate_detected."
+        )
+
+        # print("user_msg: ", user_msg)
+
+        messages = [
+            {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg},
+        ]
+
+        print("messages: ", messages)
+
+        _judge_logger.debug("[judge][%s] Firing judge call steps=%d rounds=%d/%d prior_acd=%s",
+                            task_id, step_count, rounds_so_far, TOTAL_ROUND, prior_acd)
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.0,
+            max_tokens=1024,
+            extra_body={"priority": 0},  # judge calls always jump the queue
+        )
+
+        print("judge_response: ", response)
+
+        choice = response.choices[0]
+        content = (choice.message.content or "").strip()
+        reasoning_content = ""
+        if choice.message.model_extra is not None:
+            reasoning_content = choice.message.model_extra.get("reasoning_content", "") or ""
+
+        parsed, method = _parse_judge_response(content, reasoning_content)
+
+        if parsed:
+            prediction = parsed.get("prediction", "Unknown")
+            acd = parsed.get("answer_candidate_detected", False)
+            reasoning = parsed.get("reasoning", "")
+
+            # ACD is monotonic: once True stays True
+            new_acd = prior_acd or (acd is True)
+
+            task_state["prediction_out"] = prediction
+            task_state["acd_out"] = new_acd
+
+            _judge_logger.info(
+                "[judge][%s] prediction=%s confidence=%.2f acd=%s (prior=%s) method=%s | %s",
+                task_id, prediction, parsed.get("confidence", 0.0),
+                new_acd, prior_acd, method, reasoning[:120],
+            )
+        else:
+            _judge_logger.warning("[judge][%s] Parse failed content=%.100s", task_id, content)
+            task_state["prediction_out"] = None
+            task_state["acd_out"] = prior_acd  # preserve prior state on failure
+
+    except Exception as e:
+        _judge_logger.exception("[judge][%s] Judge call failed: %s", task_id, e)
+        task_state["prediction_out"] = None
+        task_state["acd_out"] = task_state.get("prior_acd", False)
+    finally:
+        task_state["firing_done"] = True
+
+
+_STEP_GROUPS = [(10, 1), (20, 5), (30, 10), (40, 15)]
+_STEP_MAX_PRIORITY = 20
+_STEP_MAX_PENALTY  = 25
+
+def _step_priority(step_count: int) -> int:
+    for threshold, priority in _STEP_GROUPS:
+        if step_count <= threshold:
+            return priority
+    return _STEP_MAX_PRIORITY
+
+def _next_group_priority(current_step_priority: int) -> int:
+    priorities = [p for _, p in _STEP_GROUPS] + [_STEP_MAX_PRIORITY]
+    try:
+        idx = priorities.index(current_step_priority)
+        if idx + 1 < len(priorities):
+            return priorities[idx + 1]
+    except ValueError:
+        pass
+    return _STEP_MAX_PENALTY
 
 
 # ###### PALAK
@@ -479,6 +855,14 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     # ##### PALAK
     PALAK_TASK_STEP_COUNT = {}
     PALAK_TASK_ORCHESTRATOR_SIGNALS = {}
+    # ---- new judge state (all keyed by task_id) ----
+    PALAK_JUDGE_PREDICTION = {}   # task_id -> "Correct" | "Incorrect" | None
+    PALAK_JUDGE_ACD = {}          # task_id -> bool (running ACD state passed forward)
+    PALAK_JUDGE_FIRING = {}       # task_id -> bool (True while a judge call is in-flight)
+    PALAK_TASK_TRAJECTORY = {}    # task_id -> list of step dicts
+    PALAK_TASK_PROMPT = {}        # task_id -> str (original task question)
+    PALAK_ROUND_COUNT = {}        # task_id -> int (progress_ledger entries seen)
+    PALAK_JUDGE_HISTORY = {}
 
     def __init__(
         self,
@@ -711,260 +1095,6 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             create_args=create_args,
         )
 
-
-    #### PALAK
-    async def create(
-        self,
-        messages: Sequence[LLMMessage],
-        *,
-        tools: Sequence[Tool | ToolSchema] = [],
-        tool_choice: Tool | Literal["auto", "required", "none"] = "auto",
-        json_output: Optional[bool | type[BaseModel]] = None,
-        extra_create_args: Mapping[str, Any] = {},
-        cancellation_token: Optional[CancellationToken] = None,
-        custom_request_id: str = None,
-    ) -> CreateResult:
-        create_params = self._process_create_args(
-            messages,
-            tools,
-            tool_choice,
-            json_output,
-            extra_create_args,
-        )
-        future: Union[Task[ParsedChatCompletion[BaseModel]], Task[ChatCompletion]]
-
-        #### PALAK: 
-        from datetime import datetime, timezone
-        ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
-
-        task_priority = 0
-        task_priority_step = 0
-        task_id_from_request_id = custom_request_id.split('_')[-1]
-        print("BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT: ", BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT)
-        if task_id_from_request_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT:
-            BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] = 0
-        BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] += 1
-
-        # ###### orbit 20
-        import numpy as np
-        agent_phase_priority = {
-            "file_surfer": 0, 
-            "orchestrator_create_plan": 0, 
-            "orchestrator_gather_facts": 0, 
-            "orchestrator_prepare_final_ans": 0, 
-            "web_surfer_summarize_agent": 0, 
-            "web_surfer_generate_agent": 1, 
-            "coder": 1, 
-            "orchestrator_update_plan": 2, 
-            "orchestrator_update_fact": 2, 
-            "progress_ledger": 2
-        }
-
-        which_phase = "file_surfer"
-        for key in agent_phase_priority.keys():
-            if key in custom_request_id:
-                which_phase = key
-                break
-        print("which_phase: ", which_phase)
-        step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
-
-        if step_count <= 10:
-            task_priority_step = 0
-        elif step_count <= 20:
-            task_priority_step = 5
-        elif step_count <= 30:
-            task_priority_step = 10
-        elif step_count <= 40:
-            task_priority_step = 15
-        else:
-            task_priority_step = 20
-
-        # if task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
-        #     signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
-        #     if len(signals) > 1:
-        #         # last_signal = signals[-1][0]
-        #         # second_last_signal = signals[-2][0]
-        #         last_signal = signals[-1][1]
-        #         second_last_signal = signals[-2][1]
-        #         if not last_signal and not second_last_signal:
-        #             task_priority_step += 5 
-        # phase_penalty = agent_phase_priority[which_phase]
-        # task_priority = task_priority_step + phase_penalty
-
-
-        print(f"Task {task_id_from_request_id}: step={step_count}, priority={task_priority}")
-        print("task_priority: ", task_priority)       
-
-        if create_params.response_format is not None:
-            print(f"PALAK: IMPORTANT: [{ts}] SENT THIS REQUEST: {custom_request_id}")
-            future = asyncio.ensure_future(
-                self._client.beta.chat.completions.parse(
-                    messages=create_params.messages,
-                    tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
-                    response_format=create_params.response_format,
-                    **create_params.create_args,
-                    extra_headers={
-                        "x-request-id": f"{custom_request_id}",
-                    },
-                    # extra_body={
-                    #     "priority": task_priority
-                    # }
-                )
-            )
-        else:
-            print(f"PALAK: IMPORTANT: [{ts}] SENT THIS REQUEST: {custom_request_id}")
-            future = asyncio.ensure_future(
-                self._client.chat.completions.create(
-                    messages=create_params.messages,
-                    stream=False,
-                    tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
-                    **create_params.create_args,
-                    extra_headers={
-                        "x-request-id": f"{custom_request_id}",
-                    },
-                    # extra_body={
-                    #     "priority": task_priority
-                    # }
-                )
-            )
-
-        if cancellation_token is not None:
-            cancellation_token.link_future(future)
-        result: Union[ParsedChatCompletion[BaseModel], ChatCompletion] = await future
-        if create_params.response_format is not None:
-            result = cast(ParsedChatCompletion[Any], result)
-
-        # Handle the case where OpenAI API might return None for token counts
-        # even when result.usage is not None
-
-        usage = RequestUsage(
-            # TODO backup token counting
-            prompt_tokens=getattr(result.usage, "prompt_tokens", 0) if result.usage is not None else 0,
-            completion_tokens=getattr(result.usage, "completion_tokens", 0) if result.usage is not None else 0,
-        )
-
-        temp_LLMCallEvent = LLMCallEvent(
-                messages=cast(List[Dict[str, Any]], create_params.messages),
-                response=result.model_dump(),
-                prompt_tokens=usage.prompt_tokens,
-                completion_tokens=usage.completion_tokens,
-                tools=create_params.tools,
-            )
-
-        event_logger.info(temp_LLMCallEvent)
-
-        try:    
-            print("PALAK: result.model_dump()['choices']['message']['parsed']: ", result.model_dump()["choices"][0]["message"]["parsed"])
-        except:
-            pass
-
-        try:
-            parsed = result.model_dump()["choices"][0]["message"]["parsed"]
-            if parsed and "is_in_loop" in parsed and "is_progress_being_made" in parsed:
-                is_loop = parsed["is_in_loop"]["answer"]
-                is_progress = parsed["is_progress_being_made"]["answer"]
-                
-                # Initialize if needed
-                if task_id_from_request_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
-                    BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id] = []
-                
-                # Record the signal
-                BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id].append((is_loop, is_progress))
-        except:
-            pass  # If parsing fails, just skip signal recording
-
-        if self._resolved_model is not None:
-            if self._resolved_model != result.model:
-                warnings.warn(
-                    f"Resolved model mismatch: {self._resolved_model} != {result.model}. "
-                    "Model mapping in autogen_ext.models.openai may be incorrect. "
-                    f"Set the model to {result.model} to enhance token/cost estimation and suppress this warning.",
-                    stacklevel=2,
-                )
-
-        # Limited to a single choice currently.
-        choice: Union[ParsedChoice[Any], ParsedChoice[BaseModel], Choice] = result.choices[0]
-
-        # Detect whether it is a function call or not.
-        # We don't rely on choice.finish_reason as it is not always accurate, depending on the API used.
-        content: Union[str, List[FunctionCall]]
-        thought: str | None = None
-        if choice.message.function_call is not None:
-            raise ValueError("function_call is deprecated and is not supported by this model client.")
-        elif choice.message.tool_calls is not None and len(choice.message.tool_calls) > 0:
-            if choice.finish_reason != "tool_calls":
-                warnings.warn(
-                    f"Finish reason mismatch: {choice.finish_reason} != tool_calls "
-                    "when tool_calls are present. Finish reason may not be accurate. "
-                    "This may be due to the API used that is not returning the correct finish reason.",
-                    stacklevel=2,
-                )
-            if choice.message.content is not None and choice.message.content != "":
-                # Put the content in the thought field.
-                thought = choice.message.content
-            # NOTE: If OAI response type changes, this will need to be updated
-            content = []
-            for tool_call in choice.message.tool_calls:
-                if not isinstance(tool_call.function.arguments, str):
-                    warnings.warn(
-                        f"Tool call function arguments field is not a string: {tool_call.function.arguments}."
-                        "This is unexpected and may due to the API used not returning the correct type. "
-                        "Attempting to convert it to string.",
-                        stacklevel=2,
-                    )
-                    if isinstance(tool_call.function.arguments, dict):
-                        tool_call.function.arguments = json.dumps(tool_call.function.arguments)
-                content.append(
-                    FunctionCall(
-                        id=tool_call.id,
-                        arguments=tool_call.function.arguments,
-                        name=normalize_name(tool_call.function.name),
-                    )
-                )
-            finish_reason = "tool_calls"
-        else:
-            # if not tool_calls, then it is a text response and we populate the content and thought fields.
-            finish_reason = choice.finish_reason
-            content = choice.message.content or ""
-            # if there is a reasoning_content field, then we populate the thought field. This is for models such as R1 - direct from deepseek api.
-            if choice.message.model_extra is not None:
-                reasoning_content = choice.message.model_extra.get("reasoning_content")
-                if reasoning_content is not None:
-                    thought = reasoning_content
-
-        logprobs: Optional[List[ChatCompletionTokenLogprob]] = None
-        if choice.logprobs and choice.logprobs.content:
-            logprobs = [
-                ChatCompletionTokenLogprob(
-                    token=x.token,
-                    logprob=x.logprob,
-                    top_logprobs=[TopLogprob(logprob=y.logprob, bytes=y.bytes) for y in x.top_logprobs],
-                    bytes=x.bytes,
-                )
-                for x in choice.logprobs.content
-            ]
-
-        #   This is for local R1 models.
-        if isinstance(content, str) and self._model_info["family"] == ModelFamily.R1 and thought is None:
-            thought, content = parse_r1_content(content)
-
-        response = CreateResult(
-            finish_reason=normalize_stop_reason(finish_reason),
-            content=content,
-            usage=usage,
-            cached=False,
-            logprobs=logprobs,
-            thought=thought,
-        )
-
-        self._total_usage = _add_usage(self._total_usage, usage)
-        self._actual_usage = _add_usage(self._actual_usage, usage)
-
-        # TODO - why is this cast needed?
-        return response
-
-
-
     # #### PALAK
     # async def create(
     #     self,
@@ -983,7 +1113,6 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     #         tool_choice,
     #         json_output,
     #         extra_create_args,
-    #         # extra_create_args={**extra_create_args, 'priority': 5},
     #     )
     #     future: Union[Task[ParsedChatCompletion[BaseModel]], Task[ChatCompletion]]
 
@@ -991,74 +1120,15 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     #     from datetime import datetime, timezone
     #     ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
-    #     # ###### multi-step priority scheme
     #     task_priority = 0
     #     task_priority_step = 0
-    #     task_priority_toolcall = 0
     #     task_id_from_request_id = custom_request_id.split('_')[-1]
     #     print("BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT: ", BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT)
-
     #     if task_id_from_request_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT:
     #         BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] = 0
     #     BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] += 1
-    #     task_priority_step = 0
 
-
-    #     # ###### OG
-    #     # import numpy as np
-    #     # agent_phase_priority = {
-    #     #     "file_surfer": 0, 
-    #     #     "orchestrator_create_plan": 0, 
-    #     #     "orchestrator_gather_facts": 0, 
-    #     #     "orchestrator_prepare_final_ans": 0, 
-    #     #     "web_surfer_summarize_agent": 0, 
-    #     #     "web_surfer_generate_agent": 1, 
-    #     #     "coder": 1, 
-    #     #     "orchestrator_update_plan": 2, 
-    #     #     "orchestrator_update_fact": 2, 
-    #     #     "progress_ledger": 2
-    #     # }
-
-    #     # # Find which phase
-    #     # which_phase = "file_surfer"
-    #     # for key in agent_phase_priority.keys():
-    #     #     if key in custom_request_id:
-    #     #         which_phase = key
-    #     #         break
-
-    #     # step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
-    #     # phase_penalty = agent_phase_priority[which_phase]
-
-    #     # # 3-Level Priority System
-    #     # if step_count < 5:
-    #     #     # LEVEL 1: Very High Priority (just started)
-    #     #     # Priority range: 0-2
-    #     #     task_priority = phase_penalty
-            
-    #     # elif step_count < 10:
-    #     #     # LEVEL 2: High Priority (making progress, not drifted yet)
-    #     #     # Priority range: 10-12
-    #     #     task_priority = 10 + phase_penalty
-            
-    #     # elif step_count < 20:
-    #     #     # LEVEL 2: High Priority (making progress, not drifted yet)
-    #     #     # Priority range: 10-12
-    #     #     task_priority = 20 + phase_penalty
-
-    #     # else:
-    #     #     # LEVEL 3: Deprioritized (likely drifting)
-    #     #     # Priority range: 100+
-    #     #     steps_over = step_count - 10
-    #     #     base_penalty = 100
-    #     #     step_contribution = int(10 * np.log1p(steps_over))
-    #     #     task_priority = base_penalty + step_contribution + phase_penalty
-
-    #     # print(f"Task {task_id_from_request_id}: step={step_count}, phase={which_phase}, priority={task_priority}")
-        
-
-    #     # ============================================================
-    #     # CHANGE 3: Add signal multiplier to priority calculation
-    #     # ============================================================
+    #     # ###### orbit 20
     #     import numpy as np
     #     agent_phase_priority = {
     #         "file_surfer": 0, 
@@ -1072,27 +1142,40 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     #         "orchestrator_update_fact": 2, 
     #         "progress_ledger": 2
     #     }
+
+    #     which_phase = "file_surfer"
+    #     for key in agent_phase_priority.keys():
+    #         if key in custom_request_id:
+    #             which_phase = key
+    #             break
+    #     print("which_phase: ", which_phase)
     #     step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
-    #     phase_penalty = agent_phase_priority[which_phase]
 
-    #     task_priority = step_count + phase_penalty
+    #     if step_count <= 10:
+    #         task_priority_step = 0
+    #     elif step_count <= 20:
+    #         task_priority_step = 5
+    #     elif step_count <= 30:
+    #         task_priority_step = 10
+    #     elif step_count <= 40:
+    #         task_priority_step = 15
+    #     else:
+    #         task_priority_step = 20
 
-    #     # Signal multiplier (after step 5)
-    #     if step_count >= 5 and task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
-    #         signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
-    #         early_signals = signals[:min(5, len(signals))]
-    #         early_no_progress = sum(1 for _, is_progress in early_signals if not is_progress)
-    #         early_loop = sum(1 for is_loop, _ in early_signals if is_loop)
-            
-    #         if early_no_progress == 0 and early_loop == 0:
-    #             task_priority = int(task_priority * 0.5)
-    #         elif early_no_progress >= 2 or early_loop >= 2:
-    #             task_priority = int(task_priority * 2.0)
-    #     print(f"Task {task_id_from_request_id}: step={step_count}, phase={which_phase}, priority={task_priority}")
+    #     # if task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+    #     #     signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+    #     #     if len(signals) > 1:
+    #     #         # last_signal = signals[-1][0]
+    #     #         # second_last_signal = signals[-2][0]
+    #     #         last_signal = signals[-1][1]
+    #     #         second_last_signal = signals[-2][1]
+    #     #         if not last_signal and not second_last_signal:
+    #     #             task_priority_step += 5 
+    #     # phase_penalty = agent_phase_priority[which_phase]
+    #     # task_priority = task_priority_step + phase_penalty
 
 
-
-    #     task_priority = task_priority_step
+    #     print(f"Task {task_id_from_request_id}: step={step_count}, priority={task_priority}")
     #     print("task_priority: ", task_priority)       
 
     #     if create_params.response_format is not None:
@@ -1106,9 +1189,9 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     #                 extra_headers={
     #                     "x-request-id": f"{custom_request_id}",
     #                 },
-    #                 extra_body={
-    #                     "priority": task_priority
-    #                 }
+    #                 # extra_body={
+    #                 #     "priority": task_priority
+    #                 # }
     #             )
     #         )
     #     else:
@@ -1122,9 +1205,9 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     #                 extra_headers={
     #                     "x-request-id": f"{custom_request_id}",
     #                 },
-    #                 extra_body={
-    #                     "priority": task_priority
-    #                 }
+    #                 # extra_body={
+    #                 #     "priority": task_priority
+    #                 # }
     #             )
     #         )
 
@@ -1158,7 +1241,6 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     #     except:
     #         pass
 
-    #     # ADD THIS RIGHT AFTER:
     #     try:
     #         parsed = result.model_dump()["choices"][0]["message"]["parsed"]
     #         if parsed and "is_in_loop" in parsed and "is_progress_being_made" in parsed:
@@ -1173,17 +1255,6 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     #             BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id].append((is_loop, is_progress))
     #     except:
     #         pass  # If parsing fails, just skip signal recording
-        
-
-    #     # logger.info(
-    #     #     LLMCallEvent(
-    #     #         messages=cast(List[Dict[str, Any]], create_params.messages),
-    #     #         response=result.model_dump(),
-    #     #         prompt_tokens=usage.prompt_tokens,
-    #     #         completion_tokens=usage.completion_tokens,
-    #     #         tools=create_params.tools,
-    #     #     )
-    #     # )
 
     #     if self._resolved_model is not None:
     #         if self._resolved_model != result.model:
@@ -1274,6 +1345,430 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
 
     #     # TODO - why is this cast needed?
     #     return response
+
+    #### PALAK: external assessment progress
+    async def create(
+        self,
+        messages,
+        *,
+        tools=[],
+        tool_choice="auto",
+        json_output=None,
+        extra_create_args={},
+        cancellation_token=None,
+        custom_request_id=None,
+    ):
+        create_params = self._process_create_args(
+            messages, tools, tool_choice, json_output, extra_create_args,
+        )
+
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+        # ----------------------------------------------------------------
+        # Task identification and step counting (unchanged)
+        # ----------------------------------------------------------------
+        task_id = custom_request_id.split('_')[-1]
+
+        if task_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT:
+            BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id] = 0
+        BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id] += 1
+        step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id]
+
+        # Identify which phase/agent this call is from
+        agent_phases = [
+            "file_surfer", "orchestrator_create_plan", "orchestrator_gather_facts",
+            "orchestrator_prepare_final_ans", "web_surfer_summarize_agent",
+            "web_surfer_generate_agent", "coder", "orchestrator_update_plan",
+            "orchestrator_update_fact", "progress_ledger",
+        ]
+        which_phase = "file_surfer"
+        for key in agent_phases:
+            if key in custom_request_id:
+                which_phase = key
+                break
+
+        # ----------------------------------------------------------------
+        # Extract task prompt once (from first orchestrator gather_facts call)
+        # ----------------------------------------------------------------
+        if (task_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_PROMPT
+                and which_phase == "orchestrator_gather_facts"):
+            task_prompt = _extract_task_prompt(create_params.messages)
+            if task_prompt:
+                print("Here's the task prompt: ", task_prompt)
+                BaseOpenAIChatCompletionClient.PALAK_TASK_PROMPT[task_id] = task_prompt
+                _judge_logger.debug("[judge][%s] Task prompt extracted: %.80s", task_id, task_prompt)
+
+        # # ----------------------------------------------------------------
+        # # Priority assignment (uses last judge result, default 1)
+        # # ----------------------------------------------------------------
+        # judge_prediction = BaseOpenAIChatCompletionClient.PALAK_JUDGE_PREDICTION.get(task_id)
+        # print("judge_prediction: ", judge_prediction)
+        # if step_count <= 10 or judge_prediction is None:
+        #     task_priority = 1
+        # elif judge_prediction == "Incorrect":
+        #     task_priority = 10
+        # else:
+        #     task_priority = 1  # Correct or unknown → keep normal priority
+
+
+        if task_id not in BaseOpenAIChatCompletionClient.PALAK_JUDGE_HISTORY:
+            BaseOpenAIChatCompletionClient.PALAK_JUDGE_HISTORY[task_id] = []
+
+        base_priority    = _step_priority(step_count)
+        latest_judge     = BaseOpenAIChatCompletionClient.PALAK_JUDGE_PREDICTION.get(task_id)
+        judge_history    = BaseOpenAIChatCompletionClient.PALAK_JUDGE_HISTORY.get(task_id, [])
+
+        if latest_judge is None or latest_judge == "Correct":
+            # No judge result yet, or judge says Correct — pure step priority
+            task_priority = base_priority
+
+        else:  # latest_judge == "Incorrect"
+            if step_count <= 10:
+                # Only shift after 3 consecutive Incorrect predictions
+                consecutive = 0
+                for pred in reversed(judge_history):
+                    if pred == "Incorrect":
+                        consecutive += 1
+                    else:
+                        break
+                task_priority = _next_group_priority(base_priority) if consecutive >= 3 else base_priority
+            else:
+                task_priority = _next_group_priority(base_priority)
+
+        print(f"[{task_id}] step={step_count} base={base_priority} "
+            f"judge={latest_judge} final_priority={task_priority}")
+
+        # ----------------------------------------------------------------
+        # Send the actual LLM request (unchanged logic, priority now live)
+        # ----------------------------------------------------------------
+        print(f"PALAK: IMPORTANT: [{ts}] SENT THIS REQUEST: {custom_request_id}")
+        if create_params.response_format is not None:
+            future = asyncio.ensure_future(
+                self._client.beta.chat.completions.parse(
+                    messages=create_params.messages,
+                    tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
+                    response_format=create_params.response_format,
+                    **create_params.create_args,
+                    extra_headers={"x-request-id": custom_request_id},
+                    extra_body={"priority": task_priority},
+                )
+            )
+        else:
+            future = asyncio.ensure_future(
+                self._client.chat.completions.create(
+                    messages=create_params.messages,
+                    stream=False,
+                    tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
+                    **create_params.create_args,
+                    extra_headers={"x-request-id": custom_request_id},
+                    extra_body={"priority": task_priority},
+                )
+            )
+
+        if cancellation_token is not None:
+            cancellation_token.link_future(future)
+        result = await future
+        if create_params.response_format is not None:
+            result = cast(ParsedChatCompletion[Any], result)
+
+        # ----------------------------------------------------------------
+        # Usage (unchanged)
+        # ----------------------------------------------------------------
+        usage = RequestUsage(
+            prompt_tokens=getattr(result.usage, "prompt_tokens", 0) if result.usage else 0,
+            completion_tokens=getattr(result.usage, "completion_tokens", 0) if result.usage else 0,
+        )
+
+        # ----------------------------------------------------------------
+        # Log the LLM call event (unchanged)
+        # ----------------------------------------------------------------
+        temp_LLMCallEvent = LLMCallEvent(
+            messages=cast(List[Dict[str, Any]], create_params.messages),
+            response=result.model_dump(),
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            tools=create_params.tools,
+        )
+        event_logger.info(temp_LLMCallEvent)
+
+        # ----------------------------------------------------------------
+        # Orchestrator signals (unchanged)
+        # ----------------------------------------------------------------
+        try:
+            parsed_result = result.model_dump()["choices"][0]["message"]["parsed"]
+            if parsed_result and "is_in_loop" in parsed_result and "is_progress_being_made" in parsed_result:
+                is_loop = parsed_result["is_in_loop"]["answer"]
+                is_progress = parsed_result["is_progress_being_made"]["answer"]
+                if task_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+                    BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id] = []
+                BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id].append(
+                    (is_loop, is_progress)
+                )
+        except Exception:
+            pass
+
+        # ----------------------------------------------------------------
+        # NEW: Accumulate trajectory step
+        # ----------------------------------------------------------------
+        result_dump = result.model_dump()
+        choice_msg = result_dump["choices"][0]["message"]
+
+        if task_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_TRAJECTORY:
+            BaseOpenAIChatCompletionClient.PALAK_TASK_TRAJECTORY[task_id] = []
+        if task_id not in BaseOpenAIChatCompletionClient.PALAK_ROUND_COUNT:
+            BaseOpenAIChatCompletionClient.PALAK_ROUND_COUNT[task_id] = 0
+
+        step_num = step_count
+        is_progress_ledger = (which_phase == "progress_ledger")
+
+        if is_progress_ledger:
+            # Increment round counter
+            BaseOpenAIChatCompletionClient.PALAK_ROUND_COUNT[task_id] += 1
+            round_num = BaseOpenAIChatCompletionClient.PALAK_ROUND_COUNT[task_id]
+
+            # Extract orchestrator assessment from parsed result
+            assessment = {}
+            # try:
+            #     p = choice_msg.get("parsed") or {}
+            #     def _flat(val, fallback=""):
+            #         """Extract a plain string from a field that may be a nested dict."""
+            #         if isinstance(val, dict):
+            #             return val.get("answer", val.get("reason", fallback))
+            #         return val if val is not None else fallback
+
+            #     assessment = {
+            #         "is_request_satisfied": _flat(p.get("is_request_satisfied", {}).get("answer", "?") if isinstance(p.get("is_request_satisfied"), dict) else p.get("is_request_satisfied", "?")),
+            #         "is_request_satisfied_reason": _flat(p.get("is_request_satisfied", {}).get("reason", "") if isinstance(p.get("is_request_satisfied"), dict) else ""),
+            #         "is_in_loop": _flat(p.get("is_in_loop", {}).get("answer", "?") if isinstance(p.get("is_in_loop"), dict) else p.get("is_in_loop", "?")),
+            #         "is_progress_being_made": _flat(p.get("is_progress_being_made", {}).get("answer", "?") if isinstance(p.get("is_progress_being_made"), dict) else p.get("is_progress_being_made", "?")),
+            #         "is_progress_being_made_reason": _flat(p.get("is_progress_being_made", {}).get("reason", "") if isinstance(p.get("is_progress_being_made"), dict) else ""),
+            #         "next_speaker": _flat(p.get("next_speaker", "")),
+            #         "instruction_or_question_reason": _flat(p.get("instruction_or_question_reason", "")),
+            #     }
+            # except Exception:
+            #     pass
+
+            try:
+                p = choice_msg.get("parsed") or {}
+
+                def _flat(val, fallback=""):
+                    if isinstance(val, dict):
+                        return val.get("answer", val.get("reason", fallback))
+                    return val if val is not None else fallback
+
+                # p may be a Pydantic LedgerEntry object or a plain dict
+                # handle both with getattr-with-dict-fallback
+                def _get(obj, key, fallback=None):
+                    if isinstance(obj, dict):
+                        return obj.get(key, fallback)
+                    return getattr(obj, key, fallback)
+
+                is_req_sat     = _get(p, "is_request_satisfied", {})
+                is_loop        = _get(p, "is_in_loop", {})
+                is_progress    = _get(p, "is_progress_being_made", {})
+                next_spk       = _get(p, "next_speaker", "")
+                iq_reason      = _get(p, "instruction_or_question_reason", "")
+
+                assessment = {
+                    "is_request_satisfied":        _flat(_get(is_req_sat,  "answer", "?") if is_req_sat else "?"),
+                    "is_request_satisfied_reason": _flat(_get(is_req_sat,  "reason", "")  if is_req_sat else ""),
+                    "is_in_loop":                  _flat(_get(is_loop,     "answer", "?") if is_loop    else "?"),
+                    "is_progress_being_made":      _flat(_get(is_progress, "answer", "?") if is_progress else "?"),
+                    "is_progress_being_made_reason": _flat(_get(is_progress, "reason", "") if is_progress else ""),
+                    "next_speaker":                _flat(next_spk),
+                    "instruction_or_question_reason": _flat(iq_reason),
+                }
+            except Exception as e:
+                _judge_logger.debug("[judge][%s] assessment extraction failed: %s", task_id, e)
+                pass
+
+            BaseOpenAIChatCompletionClient.PALAK_TASK_TRAJECTORY[task_id].append({
+                "step_type": "progress_ledger",
+                "step_num": step_num,
+                "round_num": round_num,
+                "assessment": assessment,
+            })
+
+        elif which_phase == "coder":
+            reasoning_content = ""
+            content_text = choice_msg.get("content", "")
+            if choice_msg.get("model_extra"):
+                reasoning_content = choice_msg["model_extra"].get("reasoning_content", "") or ""
+
+            BaseOpenAIChatCompletionClient.PALAK_TASK_TRAJECTORY[task_id].append({
+                "step_type": "coder_reasoning",
+                "step_num": step_num,
+                "reasoning_content": reasoning_content[:800] if reasoning_content else "",
+                "content": content_text[:400] if content_text else "",
+            })
+
+        else:
+            # Tool call step (WebSurfer, FileSurfer, etc.)
+            tool_calls = choice_msg.get("tool_calls") or []
+            tool_name = "unknown"
+            args_str = "{}"
+            if tool_calls:
+                fn = tool_calls[0].get("function", {})
+                tool_name = fn.get("name", "unknown")
+                args_raw = fn.get("arguments", "{}")
+                try:
+                    args_parsed = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                    args_str = json.dumps(args_parsed, ensure_ascii=False)
+                    if len(args_str) > 2000:
+                        args_str = args_str[:2000] + "..."
+                except Exception:
+                    args_str = str(args_raw)[:2000]
+
+            # Reasoning: from thought/reasoning_content if available
+            reasoning = ""
+            if choice_msg.get("model_extra"):
+                reasoning = choice_msg["model_extra"].get("reasoning_content", "") or ""
+            if not reasoning and choice_msg.get("content"):
+                reasoning = choice_msg.get("content", "")
+            if len(reasoning) > 2000:
+                reasoning = reasoning[:2000] + "..."
+
+            # Tool output: extract from the messages that were passed IN
+            # (the tool result messages from the previous turn, present in create_params.messages)
+            tool_output = ""
+            for msg in reversed(create_params.messages):
+                role = msg.get("role", "")
+                if role == "tool":
+                    raw = msg.get("content", "")
+                    if isinstance(raw, list):
+                        parts = [p.get("text", "") for p in raw if isinstance(p, dict)]
+                        tool_output = " ".join(parts)
+                    else:
+                        tool_output = str(raw)
+                    if len(tool_output) > 2000:
+                        tool_output = tool_output[:2000] + "..."
+                    break  # only the most recent tool result
+
+            BaseOpenAIChatCompletionClient.PALAK_TASK_TRAJECTORY[task_id].append({
+                "step_type": "tool_call",
+                "step_num": step_num,
+                "tool_name": tool_name,
+                "args_str": args_str,
+                "reasoning": reasoning,
+                "tool_output": tool_output,  # only last step's output used at format time
+            })
+
+        # ----------------------------------------------------------------
+        # NEW: Fire judge if conditions met
+        # step_count > 10 AND this is a progress_ledger entry
+        # AND no judge call currently in-flight
+        # ----------------------------------------------------------------
+        if (
+            step_count > 10
+            and is_progress_ledger
+            and not BaseOpenAIChatCompletionClient.PALAK_JUDGE_FIRING.get(task_id, False)
+        ):
+            BaseOpenAIChatCompletionClient.PALAK_JUDGE_FIRING[task_id] = True
+
+            # Snapshot the state to pass into the coroutine
+            # (trajectory is a list ref — we pass a shallow copy so appends
+            #  during the async call don't affect what the judge sees)
+            task_state = {
+                "trajectory": list(BaseOpenAIChatCompletionClient.PALAK_TASK_TRAJECTORY[task_id]),
+                "task_prompt": BaseOpenAIChatCompletionClient.PALAK_TASK_PROMPT.get(task_id, ""),
+                "prior_acd": BaseOpenAIChatCompletionClient.PALAK_JUDGE_ACD.get(task_id, False),
+                "step_count": step_count,
+                "rounds_so_far": BaseOpenAIChatCompletionClient.PALAK_ROUND_COUNT[task_id],
+                "prediction_out": None,
+                "acd_out": False,
+                "firing_done": False,
+            }
+
+            # async def _judge_callback(ts=task_state, tid=task_id):
+            #     await _fire_judge(tid, self._client, self._create_args["model"], ts)
+            #     # Write results back to class state once done
+            #     if ts["prediction_out"] is not None:
+            #         BaseOpenAIChatCompletionClient.PALAK_JUDGE_PREDICTION[tid] = ts["prediction_out"]
+            #     BaseOpenAIChatCompletionClient.PALAK_JUDGE_ACD[tid] = ts["acd_out"]
+            #     BaseOpenAIChatCompletionClient.PALAK_JUDGE_FIRING[tid] = False
+            
+            async def _judge_callback(ts=task_state, tid=task_id):
+                await _fire_judge(tid, self._client, self._create_args["model"], ts)
+                if ts["prediction_out"] is not None:
+                    BaseOpenAIChatCompletionClient.PALAK_JUDGE_PREDICTION[tid] = ts["prediction_out"]
+                    BaseOpenAIChatCompletionClient.PALAK_JUDGE_HISTORY[tid].append(ts["prediction_out"])
+                BaseOpenAIChatCompletionClient.PALAK_JUDGE_ACD[tid] = ts["acd_out"]
+                BaseOpenAIChatCompletionClient.PALAK_JUDGE_FIRING[tid] = False
+
+            asyncio.ensure_future(_judge_callback())
+            _judge_logger.debug("[judge][%s] Judge call fired (fire-and-forget) step=%d", task_id, step_count)
+
+        # ----------------------------------------------------------------
+        # Rest of create() is unchanged from original
+        # ----------------------------------------------------------------
+        if self._resolved_model is not None:
+            if self._resolved_model != result.model:
+                import warnings
+                warnings.warn(
+                    f"Resolved model mismatch: {self._resolved_model} != {result.model}.",
+                    stacklevel=2,
+                )
+
+        choice = result.choices[0]
+        content = None
+        thought = None
+
+        if choice.message.function_call is not None:
+            raise ValueError("function_call is deprecated and is not supported by this model client.")
+        elif choice.message.tool_calls is not None and len(choice.message.tool_calls) > 0:
+            if choice.message.content is not None and choice.message.content != "":
+                thought = choice.message.content
+            content = []
+            for tool_call in choice.message.tool_calls:
+                if not isinstance(tool_call.function.arguments, str):
+                    if isinstance(tool_call.function.arguments, dict):
+                        tool_call.function.arguments = json.dumps(tool_call.function.arguments)
+                content.append(
+                    FunctionCall(
+                        id=tool_call.id,
+                        arguments=tool_call.function.arguments,
+                        name=normalize_name(tool_call.function.name),
+                    )
+                )
+            finish_reason = "tool_calls"
+        else:
+            finish_reason = choice.finish_reason
+            content = choice.message.content or ""
+            if choice.message.model_extra is not None:
+                reasoning_content = choice.message.model_extra.get("reasoning_content")
+                if reasoning_content is not None:
+                    thought = reasoning_content
+
+        logprobs = None
+        if choice.logprobs and choice.logprobs.content:
+            logprobs = [
+                ChatCompletionTokenLogprob(
+                    token=x.token,
+                    logprob=x.logprob,
+                    top_logprobs=[TopLogprob(logprob=y.logprob, bytes=y.bytes) for y in x.top_logprobs],
+                    bytes=x.bytes,
+                )
+                for x in choice.logprobs.content
+            ]
+
+        if isinstance(content, str) and self._model_info["family"] == ModelFamily.R1 and thought is None:
+            thought, content = parse_r1_content(content)
+
+        response = CreateResult(
+            finish_reason=normalize_stop_reason(finish_reason),
+            content=content,
+            usage=usage,
+            cached=False,
+            logprobs=logprobs,
+            thought=thought,
+        )
+
+        self._total_usage = _add_usage(self._total_usage, usage)
+        self._actual_usage = _add_usage(self._actual_usage, usage)
+        return response
+
+
 
     async def create_stream(
         self,
