@@ -1184,30 +1184,29 @@ def run_cli(args: Sequence[str]) -> None:
 
         import time
         start_time = time.time()
-        # run_scenarios(
-        #     scenario=parsed_args.scenario,
-        #     n_repeats=parsed_args.repeat,
-        #     is_native=True if parsed_args.native else False,
-        #     config_file=parsed_args.config,
-        #     token_provider=azure_token_provider,
-        #     docker_image=parsed_args.docker_image,
-        #     subsample=subsample,
-        #     env_file=parsed_args.env,
-        # )
-        run_scenarios_poisson_independent(
+        run_scenarios(
             scenario=parsed_args.scenario,
-            # n_repeats=3,
-            n_repeats=4,
+            n_repeats=parsed_args.repeat,
             is_native=True if parsed_args.native else False,
             config_file=parsed_args.config,
             token_provider=azure_token_provider,
             docker_image=parsed_args.docker_image,
             subsample=subsample,
             env_file=parsed_args.env,
-            # poisson_rate=64
-            poisson_rate=4
-            # poisson_rate=2
-        ) 
+        )
+        # run_scenarios_poisson_independent(
+        #     scenario=parsed_args.scenario,
+        #     # n_repeats=3,
+        #     n_repeats=4,
+        #     is_native=True if parsed_args.native else False,
+        #     config_file=parsed_args.config,
+        #     token_provider=azure_token_provider,
+        #     docker_image=parsed_args.docker_image,
+        #     subsample=subsample,
+        #     env_file=parsed_args.env,
+        #     # poisson_rate=64
+        #     poisson_rate=4
+        # ) 
         end_time = time.time()
         elapsed_seconds = end_time - start_time
         print(f"start time: ", start_time)

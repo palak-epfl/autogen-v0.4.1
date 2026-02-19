@@ -479,6 +479,7 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     # ##### PALAK
     PALAK_TASK_STEP_COUNT = {}
     PALAK_TASK_ORCHESTRATOR_SIGNALS = {}
+    PALAK_PREV_TASK_PRIORITY = 0
 
     def __init__(
         self,
@@ -745,7 +746,8 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] = 0
         BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] += 1
 
-        # ###### orbit 20
+
+        # ###### orbit 19
         import numpy as np
         agent_phase_priority = {
             "file_surfer": 0, 
@@ -766,8 +768,8 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
                 which_phase = key
                 break
         print("which_phase: ", which_phase)
-        step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
 
+        step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
         if step_count <= 10:
             task_priority_step = 0
         elif step_count <= 20:
@@ -779,20 +781,111 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         else:
             task_priority_step = 20
 
-        # if task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
-        #     signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
-        #     if len(signals) > 1:
-        #         # last_signal = signals[-1][0]
-        #         # second_last_signal = signals[-2][0]
-        #         last_signal = signals[-1][1]
-        #         second_last_signal = signals[-2][1]
-        #         if not last_signal and not second_last_signal:
-        #             task_priority_step += 5 
+        if task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+            signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+            if len(signals) > 1:
+                last_signal = signals[-1][0]
+                second_last_signal = signals[-2][0]
+                if last_signal and second_last_signal:
+                    task_priority_step += 5 
+
+        phase_penalty = agent_phase_priority[which_phase]
+        task_priority = task_priority_step + phase_penalty
+
+        #### orbit 18 (orbit 19 is same as orbit 18 without these two lines)
+        # task_priority = max(BaseOpenAIChatCompletionClient.PALAK_PREV_TASK_PRIORITY, task_priority) ##### is this bad?
+        # BaseOpenAIChatCompletionClient.PALAK_PREV_TASK_PRIORITY = task_priority
+
+
+        # ###### orbit 14
+        # import numpy as np
+        # agent_phase_priority = {
+        #     "file_surfer": 0, 
+        #     "orchestrator_create_plan": 0, 
+        #     "orchestrator_gather_facts": 0, 
+        #     "orchestrator_prepare_final_ans": 0, 
+        #     "web_surfer_summarize_agent": 0, 
+        #     "web_surfer_generate_agent": 1, 
+        #     "coder": 1, 
+        #     "orchestrator_update_plan": 2, 
+        #     "orchestrator_update_fact": 2, 
+        #     "progress_ledger": 2
+        # }
+        # step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
         # phase_penalty = agent_phase_priority[which_phase]
-        # task_priority = task_priority_step + phase_penalty
 
+        # task_priority = step_count + phase_penalty
+        # task_priority = step_count
 
+        ####### orbit 14
+        # if step_count > 5 and task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+        #     task_priority = step_count
+        #     signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+        #     early_signals = signals[:min(5, len(signals))] ##### orbit 14
+        #     early_no_progress = sum(1 for _, is_progress in early_signals if not is_progress)
+        #     early_loop = sum(1 for is_loop, _ in early_signals if is_loop)
+        #     print("initial task priority: ", task_priority)
+        #     print("early_loop: ", early_loop)
+        #     print("early_no_progress: ", early_no_progress)
+        #     # if early_no_progress == 0 and early_loop == 0:
+        #     #     task_priority = int(task_priority * 0.5)
+        #     # elif early_no_progress >= 2 or early_loop >= 2:
+        #     #     task_priority = int(task_priority * 2.0)
+
+        #     if early_no_progress == 0 and early_loop == 0:
+        #         task_priority = 5
+        #     elif early_no_progress >= 2 or early_loop >= 2:
+        #         task_priority = 50
+        #     print("new task priority: ", task_priority)
+
+        # ###### orbit 15
+        # if step_count > 5 and task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+        #     signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+        #     loop_count = sum(1 for is_loop, _ in signals if is_loop)
+        #     progress_count = sum(1 for _, is_progress in signals if is_progress)
+        #     task_priority = 1 + loop_count + progress_count
+        #     print(f"Task {task_id_from_request_id}: step={step_count}, "
+        #         f"priority={task_priority}, "
+        #         f"loop={loop_count}, progress={progress_count}, "
+        #         f"ratio={task_priority/step_count:.2f}")
+            
+        
+        # ###### orbit 17
+        # if step_count > 5 and task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+        #     signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+        #     loop_count = sum(1 for is_loop, _ in signals if is_loop)
+        #     progress_count = sum(1 for _, is_progress in signals if is_progress)
+
+        #     early_signals = signals[:min(5, len(signals))] 
+        #     early_no_progress = sum(1 for _, is_progress in early_signals if not is_progress)
+        #     early_loop = sum(1 for is_loop, _ in early_signals if is_loop)
+        #     print("initial task priority: ", task_priority)
+        #     print("early_loop: ", early_loop)
+        #     print("early_no_progress: ", early_no_progress)
+
+        #     sum_count = loop_count + progress_count
+        #     task_priority = sum_count
+
+        #     # ###### orbit 16
+        #     # if early_no_progress == 0 and early_loop == 0:
+        #     #     task_priority = 1
+        #     # elif (early_no_progress >= 2 or early_loop >= 2) and sum_count >= 7:
+        #     #     task_priority = 50
+        #     # elif (early_no_progress == 0 or early_loop == 0) and sum_count < 7:
+        #     #     task_priority = 2
+
+        #     if early_no_progress == 0 and early_loop == 0 and sum_count < 5 :
+        #         task_priority = 0
+        #     elif (early_no_progress >= 2 or early_loop >= 2) and sum_count > 6:
+        #         task_priority = 50
+        #     elif (early_no_progress == 0 or early_loop == 0) and sum_count < 7:
+        #         task_priority = 1
+        #     print(f"Task {task_id_from_request_id}: step={step_count}, "
+        #         f"priority={task_priority}, "
+        #         f"loop={loop_count}, progress={progress_count}, "
+        #         f"ratio={task_priority/step_count:.2f}")
         print(f"Task {task_id_from_request_id}: step={step_count}, priority={task_priority}")
+        # task_priority = task_priority_step
         print("task_priority: ", task_priority)       
 
         if create_params.response_format is not None:
@@ -806,9 +899,9 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
                     extra_headers={
                         "x-request-id": f"{custom_request_id}",
                     },
-                    # extra_body={
-                    #     "priority": task_priority
-                    # }
+                    extra_body={
+                        "priority": task_priority
+                    }
                 )
             )
         else:
@@ -822,9 +915,9 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
                     extra_headers={
                         "x-request-id": f"{custom_request_id}",
                     },
-                    # extra_body={
-                    #     "priority": task_priority
-                    # }
+                    extra_body={
+                        "priority": task_priority
+                    }
                 )
             )
 
@@ -872,6 +965,17 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
                 BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id].append((is_loop, is_progress))
         except:
             pass  # If parsing fails, just skip signal recording
+        
+
+        # logger.info(
+        #     LLMCallEvent(
+        #         messages=cast(List[Dict[str, Any]], create_params.messages),
+        #         response=result.model_dump(),
+        #         prompt_tokens=usage.prompt_tokens,
+        #         completion_tokens=usage.completion_tokens,
+        #         tools=create_params.tools,
+        #     )
+        # )
 
         if self._resolved_model is not None:
             if self._resolved_model != result.model:
