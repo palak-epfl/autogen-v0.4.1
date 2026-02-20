@@ -723,6 +723,8 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             messages, tools, tool_choice, json_output, extra_create_args,
         )
 
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         
         print(f"PALAK: IMPORTANT: [{ts}] SENT THIS REQUEST: {custom_request_id}")
         if create_params.response_format is not None:
