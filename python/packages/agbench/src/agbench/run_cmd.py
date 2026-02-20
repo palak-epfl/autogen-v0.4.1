@@ -1204,7 +1204,7 @@ def run_cli(args: Sequence[str]) -> None:
             subsample=subsample,
             env_file=parsed_args.env,
             # poisson_rate=64
-            poisson_rate=4
+            poisson_rate=0.1
         ) 
         end_time = time.time()
         elapsed_seconds = end_time - start_time
