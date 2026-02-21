@@ -1203,8 +1203,7 @@ def run_cli(args: Sequence[str]) -> None:
             docker_image=parsed_args.docker_image,
             subsample=subsample,
             env_file=parsed_args.env,
-            # poisson_rate=64
-            poisson_rate=0.1
+            poisson_rate=0.5
         ) 
         end_time = time.time()
         elapsed_seconds = end_time - start_time
