@@ -108,13 +108,16 @@ except PackageNotFoundError:
     version_info = "dev"
 AZURE_OPENAI_USER_AGENT = f"autogen-python/{version_info}"
 
-# ###### PALAK (for online external assement progress)
 
-import json
-import re
-import asyncio
-import logging
-from typing import Optional
+_STEP_GROUPS = [(10, 0), (20, 5), (30, 10), (40, 15)]
+_STEP_MAX_PRIORITY = 20
+
+def _step_priority(step_count: int) -> int:
+    for threshold, priority in _STEP_GROUPS:
+        if step_count <= threshold:
+            return priority
+    return _STEP_MAX_PRIORITY
+
 
 
 # ###### PALAK
@@ -125,6 +128,9 @@ class LogHandler(logging.FileHandler):
         self.print_message = print_message
 
     def emit(self, record: logging.LogRecord) -> None:
+        # print("PALAK: here's out logger emit event :)")
+        # print("PALAK: record: ", record)
+        # print("PALAK: type(record): ", type(record))
         try:
             ts = datetime.fromtimestamp(record.created).isoformat()
             msg = record.msg
@@ -153,6 +159,7 @@ file_handler.setFormatter(logging.Formatter("%(message)s"))
 event_logger = logging.getLogger(EVENT_LOGGER_NAME)
 event_logger.setLevel(logging.DEBUG)
 event_logger.addHandler(file_handler)
+
 
 
 def _azure_openai_client_from_config(config: Mapping[str, Any]) -> AsyncAzureOpenAI:
@@ -476,6 +483,10 @@ class CreateParams:
 
 
 class BaseOpenAIChatCompletionClient(ChatCompletionClient):
+    # ##### PALAK
+    PALAK_TASK_STEP_COUNT = {}
+    PALAK_TASK_ORCHESTRATOR_SIGNALS = {}
+
     def __init__(
         self,
         client: Union[AsyncOpenAI, AsyncAzureOpenAI],
@@ -707,7 +718,8 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             create_args=create_args,
         )
 
-    #### FCFS
+
+    #### PALAK: orbit-1-1
     async def create(
         self,
         messages,
@@ -725,7 +737,25 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
 
         from datetime import datetime, timezone
         ts = datetime.now(timezone.utc).isoformat(timespec="microseconds")
-        
+
+        # ----------------------------------------------------------------
+        # Task identification and step counting (unchanged)
+        # ----------------------------------------------------------------
+        task_id = custom_request_id.split('_')[-1]
+
+        if task_id not in BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT:
+            BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id] = 0
+        BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id] += 1
+        step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id]
+
+        base_priority = _step_priority(step_count)
+        task_priority = base_priority
+
+        print(f"[{task_id}] step={step_count} final_priority={task_priority}")
+
+        # ----------------------------------------------------------------
+        # Send the actual LLM request (unchanged logic, priority now live)
+        # ----------------------------------------------------------------
         print(f"PALAK: IMPORTANT: [{ts}] SENT THIS REQUEST: {custom_request_id}")
         if create_params.response_format is not None:
             future = asyncio.ensure_future(
@@ -735,7 +765,7 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
                     response_format=create_params.response_format,
                     **create_params.create_args,
                     extra_headers={"x-request-id": custom_request_id},
-                    # extra_body={"priority": task_priority},
+                    extra_body={"priority": task_priority},
                 )
             )
         else:
@@ -746,7 +776,7 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
                     tools=(create_params.tools if len(create_params.tools) > 0 else NOT_GIVEN),
                     **create_params.create_args,
                     extra_headers={"x-request-id": custom_request_id},
-                    # extra_body={"priority": task_priority},
+                    extra_body={"priority": task_priority},
                 )
             )
 
@@ -756,11 +786,17 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         if create_params.response_format is not None:
             result = cast(ParsedChatCompletion[Any], result)
 
+        # ----------------------------------------------------------------
+        # Usage (unchanged)
+        # ----------------------------------------------------------------
         usage = RequestUsage(
             prompt_tokens=getattr(result.usage, "prompt_tokens", 0) if result.usage else 0,
             completion_tokens=getattr(result.usage, "completion_tokens", 0) if result.usage else 0,
         )
 
+        # ----------------------------------------------------------------
+        # Log the LLM call event (unchanged)
+        # ----------------------------------------------------------------
         temp_LLMCallEvent = LLMCallEvent(
             messages=cast(List[Dict[str, Any]], create_params.messages),
             response=result.model_dump(),
@@ -770,6 +806,9 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
         )
         event_logger.info(temp_LLMCallEvent)
 
+        # ----------------------------------------------------------------
+        # Rest of create() is unchanged from original
+        # ----------------------------------------------------------------
         if self._resolved_model is not None:
             if self._resolved_model != result.model:
                 import warnings
