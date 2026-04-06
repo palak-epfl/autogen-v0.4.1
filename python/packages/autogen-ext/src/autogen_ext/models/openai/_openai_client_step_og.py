@@ -743,28 +743,25 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] = 0
         BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] += 1
 
-        # ###### 10-steps
-        # step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
-        # if step_count <= 10:
-        #     task_priority_step = 0
-        # elif step_count <= 20:
-        #     task_priority_step = 5
-        # elif step_count <= 30:
-        #     task_priority_step = 10
-        # elif step_count <= 40:
-        #     task_priority_step = 15
-        # else:
-        #     task_priority_step = 20
-        # task_priority = task_priority_step
+        # #### JUST CORRECT TASK
+        # correct_tasks_from_fcfs_priority_runs = {'3f57289b-8c60-48be-bd80-01f8099ca449': 2, '50ec8903-b81f-4257-9450-1085afd2c319': 4, 'f918266a-b3e0-4914-865d-4faa564f1aef': 4, 'ec09fa32-d03f-4bf8-84b0-1f16922c3ae4': 2, '2d83110e-a098-4ebb-9987-066c06fa42d0': 4, '5188369a-3bbe-43d8-8b94-11558f909a08': 4, '23dd907f-1261-4488-b21c-e9185af91d5e': 2, '50ad0280-0819-4bd9-b275-5de32d3b5bcb': 4, '8e867cd7-cff9-4e6c-867a-ff5ddc2550be': 3, '4b650a35-8529-4695-89ed-8dc7a500a498': 3, '11af4e1a-5f45-467d-9aeb-46f4bb0bf034': 4, 'dc28cf18-6431-458b-83ef-64b3ce566c10': 4, '3cef3a44-215e-4aed-8e3b-b1e3f08063b7': 3, 'a0068077-79f4-461a-adfe-75c1a4148545': 3, '27d5d136-8563-469e-92bf-fd103c28b57c': 4, '389793a7-ca17-4e82-81cb-2b3a2391b4b9': 4, '99c9cc74-fdc8-46c6-8f8d-3ce2d3bfeea3': 2, 'e1fc63a2-da7a-432f-be78-7c4a95598703': 2, 'a1e91b78-d3d8-4675-bb8d-62741b4b68a6': 4, 'c714ab3a-da30-4603-bacd-d008800188b9': 4, '42576abe-0deb-4869-8c63-225c2d75a95a': 2, '9d191bce-651d-4746-be2d-7ef8ecadb9c2': 3, '7bd855d8-463d-4ed5-93ca-5fe35145f733': 4, 'cf106601-ab4f-4af9-b045-5295fe67b37d': 4, '6f37996b-2ac7-44b0-8e68-6d28256631b4': 4, 'a3fbeb63-0e8c-4a11-bff6-0e3b484c3e9c': 4, '5a0c1adf-205e-4841-a666-7c3ef95def9d': 3, 'cffe0e32-c9a6-4c52-9877-78ceb4aaa9fb': 4, 'c365c1c7-a3db-4d5e-a9a1-66f56eae7865': 2, 'bda648d7-d618-4883-88f4-3466eabd860e': 3, '5d0080cb-90d7-4712-bc33-848150e917d3': 3, '65afbc8a-89ca-4ad5-8d62-355bb401f61d': 2, '0383a3ee-47a7-41a4-b493-519bdefe0488': 2, '5cfb274c-0207-4aa7-9575-6ac0bd95d9b2': 2}
 
-        ###### 15-2-steps
+        ###### 10-steps
         step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
-        if step_count <= 15:
+        if step_count <= 10:
             task_priority_step = 0
+        elif step_count <= 20:
+            task_priority_step = 5
+        elif step_count <= 30:
+            task_priority_step = 10
+        elif step_count <= 40:
+            task_priority_step = 15
         else:
-            task_priority_step = step_count // 2
-        task_priority = task_priority_step
+            task_priority_step = 20
+
+
         
+        task_priority = task_priority_step
 
         print(f"Task {task_id_from_request_id}: step={step_count}, priority={task_priority}")
         print("task_priority: ", task_priority)       

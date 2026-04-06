@@ -135,15 +135,15 @@ def run_scenarios_poisson_independent(
         # # -----------------------------
         # # likely_good_tasks = {'11af4e1a-5f45-467d-9aeb-46f4bb0bf034', '389793a7-ca17-4e82-81cb-2b3a2391b4b9', 'f918266a-b3e0-4914-865d-4faa564f1aef', 'a1e91b78-d3d8-4675-bb8d-62741b4b68a6', '27d5d136-8563-469e-92bf-fd103c28b57c', '2d83110e-a098-4ebb-9987-066c06fa42d0', 'cffe0e32-c9a6-4c52-9877-78ceb4aaa9fb', 'c714ab3a-da30-4603-bacd-d008800188b9', 'a3fbeb63-0e8c-4a11-bff6-0e3b484c3e9c', 'cf106601-ab4f-4af9-b045-5295fe67b37d', 'dc28cf18-6431-458b-83ef-64b3ce566c10', '50ad0280-0819-4bd9-b275-5de32d3b5bcb', '6f37996b-2ac7-44b0-8e68-6d28256631b4'}
         tasks = []
-        for instance in instances:
-            # #### PALAK: LOGIC TO ONLY RUN THESE M TASKS
-            # instance_id = instance["id"]
-            # if instance_id not in likely_good_tasks:
-            #     continue
-            # # print("instance id: ", instance_id)
-            print("instance: ", instance)
-            for i in range(n_repeats):
+        # for instance in instances:
+        #     print("instance: ", instance)
+        #     for i in range(n_repeats):
+        #         tasks.append((instance, i))
+        for i in range(n_repeats):
+            for instance in instances:
+                print("instance: ", instance)
                 tasks.append((instance, i))
+
         print("len(tasks): ", len(tasks))
         # input('........')
 
@@ -161,8 +161,8 @@ def run_scenarios_poisson_independent(
         # print("tasks len: ", len(tasks))
         # input('........')
         
-        # TRUE randomness happens here
-        random.shuffle(tasks)
+        # # TRUE randomness happens here #### WE DON'T WANT RANDOMNESS HERE
+        # random.shuffle(tasks)
 
         # -----------------------------
         # Launch each task
@@ -1194,6 +1194,7 @@ def run_cli(args: Sequence[str]) -> None:
         #     subsample=subsample,
         #     env_file=parsed_args.env,
         # )
+
         run_scenarios_poisson_independent(
             scenario=parsed_args.scenario,
             n_repeats=4,
@@ -1205,9 +1206,10 @@ def run_cli(args: Sequence[str]) -> None:
             env_file=parsed_args.env,
             poisson_rate=0.5
         ) 
+        
         end_time = time.time()
         elapsed_seconds = end_time - start_time
         print(f"start time: ", start_time)
         print(f"end time: ", end_time)
         print(f"run_scenarios_parallel completed in {elapsed_seconds:.2f} seconds")
-        input("PRESS ENTER TO CONTINUE (save the above value!)...........")
+        # input("PRESS ENTER TO CONTINUE (save the above value!)...........")

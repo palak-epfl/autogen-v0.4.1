@@ -474,9 +474,8 @@ class CreateParams:
 class BaseOpenAIChatCompletionClient(ChatCompletionClient):
     # ##### PALAK
     PALAK_TASK_STEP_COUNT = {}
-    PALAK_TASK_PRIORITY = {}
-    # PALAK_TASK_ORCHESTRATOR_SIGNALS = {}
-    # PALAK_PREV_TASK_PRIORITY = 0
+    PALAK_TASK_ORCHESTRATOR_SIGNALS = {}
+    PALAK_PREV_TASK_PRIORITY = 0
 
     def __init__(
         self,
@@ -743,31 +742,57 @@ class BaseOpenAIChatCompletionClient(ChatCompletionClient):
             BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] = 0
         BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id] += 1
 
-        # ###### 10-steps
-        # step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
-        # if step_count <= 10:
-        #     task_priority_step = 0
-        # elif step_count <= 20:
-        #     task_priority_step = 5
-        # elif step_count <= 30:
-        #     task_priority_step = 10
-        # elif step_count <= 40:
-        #     task_priority_step = 15
-        # else:
-        #     task_priority_step = 20
-        # task_priority = task_priority_step
 
-        ###### 15-2-steps
+        # ###### orbit 19
+        import numpy as np
+        agent_phase_priority = {
+            "file_surfer": 0, 
+            "orchestrator_create_plan": 0, 
+            "orchestrator_gather_facts": 0, 
+            "orchestrator_prepare_final_ans": 0, 
+            "web_surfer_summarize_agent": 0, 
+            "web_surfer_generate_agent": 1, 
+            "coder": 1, 
+            "orchestrator_update_plan": 2, 
+            "orchestrator_update_fact": 2, 
+            "progress_ledger": 2
+        }
+
+        which_phase = "file_surfer"
+        for key in agent_phase_priority.keys():
+            if key in custom_request_id:
+                which_phase = key
+                break
+        print("which_phase: ", which_phase)
+
         step_count = BaseOpenAIChatCompletionClient.PALAK_TASK_STEP_COUNT[task_id_from_request_id]
-        if step_count <= 15:
+        if step_count <= 10:
             task_priority_step = 0
+        elif step_count <= 20:
+            task_priority_step = 5
+        elif step_count <= 30:
+            task_priority_step = 10
+        elif step_count <= 40:
+            task_priority_step = 15
         else:
-            task_priority_step = step_count // 2
-        task_priority = task_priority_step
+            task_priority_step = 20
+
+        # if task_id_from_request_id in BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS:
+        #     signals = BaseOpenAIChatCompletionClient.PALAK_TASK_ORCHESTRATOR_SIGNALS[task_id_from_request_id]
+        #     if len(signals) > 1:
+        #         last_signal = signals[-1][0]
+        #         second_last_signal = signals[-2][0]
+        #         if last_signal and second_last_signal:
+        #             task_priority_step += 5 
+
+        phase_penalty = agent_phase_priority[which_phase]
+        task_priority = task_priority_step + phase_penalty
         
+        task_priority = task_priority_step
 
         print(f"Task {task_id_from_request_id}: step={step_count}, priority={task_priority}")
         print("task_priority: ", task_priority)       
+
 
         # ----------------------------------------------------------------
         # Send the actual LLM request (unchanged logic, priority now live)
